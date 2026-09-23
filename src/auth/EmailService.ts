@@ -56,9 +56,7 @@ const COPY = {
   verify_email: {
     subject: 'Confirm your TsionMarket email',
     heading: 'Confirm your email',
-    body: 'Use the link below to confirm this address and finish setting up your account.',
-    action: 'Confirm email',
-    path: '/verify-email',
+    body: 'Enter this verification code in TsionMarket to finish setting up your account.',
   },
   reset_password: {
     subject: 'Reset your TsionMarket password',
@@ -70,11 +68,7 @@ const COPY = {
 } as const
 
 function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
 class SmtpEmailService implements EmailService {
@@ -104,28 +98,53 @@ class SmtpEmailService implements EmailService {
 
   async send(message: AuthEmail): Promise<void> {
     const copy = COPY[message.purpose]
-    const link = new URL(copy.path, this.linkBaseUrl)
-    link.searchParams.set('token', message.token)
-    const href = link.toString()
     const expiry = formatDuration(message.expiresInSeconds)
 
-    const text = [
-      copy.heading,
-      '',
-      copy.body,
-      '',
-      href,
-      '',
-      `This link expires in ${expiry}.`,
-    ].join('\n')
+    if (message.purpose === 'verify_email') {
+      const safeCode = escapeHtml(message.token)
+      const text = [
+        copy.heading,
+        '',
+        copy.body,
+        '',
+        message.token,
+        '',
+        `This code expires in ${expiry}.`,
+      ].join('\n')
+      const html = `<!doctype html>
+<html><body style="margin:0;padding:24px;background:#f5f3ee;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;color:#101012">
+  <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:16px;padding:32px">
+    <h1 style="margin:0 0 16px;font-size:20px">${escapeHtml(copy.heading)}</h1>
+    <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#44444a">${escapeHtml(copy.body)}</p>
+    <div style="font-size:32px;font-weight:700;letter-spacing:8px;font-variant-numeric:tabular-nums">${safeCode}</div>
+    <p style="margin:24px 0 0;font-size:13px;line-height:1.6;color:#74726b">This code expires in ${escapeHtml(expiry)}.</p>
+  </div>
+</body></html>`
+
+      await this.transporter.sendMail({
+        from: this.from,
+        to: message.to,
+        subject: copy.subject,
+        text,
+        html,
+      })
+      return
+    }
+
+    const resetCopy = COPY.reset_password
+    const link = new URL(resetCopy.path, this.linkBaseUrl)
+    link.searchParams.set('token', message.token)
+    const href = link.toString()
+
+    const text = [copy.heading, '', copy.body, '', href, '', `This link expires in ${expiry}.`].join('\n')
 
     const safeHref = escapeHtml(href)
     const html = `<!doctype html>
 <html><body style="margin:0;padding:24px;background:#f5f3ee;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;color:#101012">
   <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:16px;padding:32px">
-    <h1 style="margin:0 0 16px;font-size:20px">${escapeHtml(copy.heading)}</h1>
-    <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#44444a">${escapeHtml(copy.body)}</p>
-    <a href="${safeHref}" style="display:inline-block;background:#101012;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:999px;font-size:15px">${escapeHtml(copy.action)}</a>
+    <h1 style="margin:0 0 16px;font-size:20px">${escapeHtml(resetCopy.heading)}</h1>
+    <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#44444a">${escapeHtml(resetCopy.body)}</p>
+    <a href="${safeHref}" style="display:inline-block;background:#101012;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:999px;font-size:15px">${escapeHtml(resetCopy.action)}</a>
     <p style="margin:24px 0 0;font-size:13px;line-height:1.6;color:#74726b">
       This link expires in ${escapeHtml(expiry)}. If the button does not work, paste this into your browser:<br>
       <span style="word-break:break-all">${safeHref}</span>
@@ -148,10 +167,7 @@ export function createEmailService(environment: Environment): EmailService {
     if (!environment.AUTH_EMAIL_PROVIDER_URL || !environment.AUTH_EMAIL_PROVIDER_API_KEY) {
       throw new Error('HTTP email provider is not fully configured')
     }
-    return new HttpEmailService(
-      environment.AUTH_EMAIL_PROVIDER_URL,
-      environment.AUTH_EMAIL_PROVIDER_API_KEY,
-    )
+    return new HttpEmailService(environment.AUTH_EMAIL_PROVIDER_URL, environment.AUTH_EMAIL_PROVIDER_API_KEY)
   }
 
   if (environment.AUTH_EMAIL_DELIVERY_MODE === 'smtp') {

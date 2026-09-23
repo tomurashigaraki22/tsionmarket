@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { PasswordService } from '../src/auth/PasswordService.js'
 import { TokenService } from '../src/auth/TokenService.js'
-import { keyedHash, normalizeEmail, randomToken } from '../src/auth/crypto.js'
+import { keyedHash, normalizeEmail, randomOtp, randomToken } from '../src/auth/crypto.js'
 import { parseEnvironment } from '../src/config/env.js'
 
 const environment = parseEnvironment({
@@ -59,6 +59,12 @@ describe('authentication cryptography', () => {
     const token = randomToken(48)
     expect(token).not.toContain('=')
     expect(keyedHash(token, environment.AUTH_REFRESH_TOKEN_PEPPER)).toMatch(/^[a-f0-9]{64}$/)
+  })
+
+  it('generates six-digit email verification codes', () => {
+    for (let index = 0; index < 100; index += 1) {
+      expect(randomOtp()).toMatch(/^\d{6}$/)
+    }
   })
 })
 

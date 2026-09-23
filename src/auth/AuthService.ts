@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Environment } from '../config/env.js'
 import { AppError } from '../utils/errors.js'
 import type { AuthRepository, NewChallenge, NewSession } from './AuthRepository.js'
-import { keyedHash, normalizeEmail, randomToken } from './crypto.js'
+import { keyedHash, normalizeEmail, randomOtp, randomToken } from './crypto.js'
 import type { EmailService } from './EmailService.js'
 import { PasswordService } from './PasswordService.js'
 import { TokenService } from './TokenService.js'
@@ -31,7 +31,7 @@ export class AuthService {
     }
     const email = normalizeEmail(input.email)
     const passwordHash = await this.passwordService.hash(input.password)
-    const rawToken = randomToken()
+    const rawToken = randomOtp()
     const challenge = this.challenge('verify_email', rawToken, this.environment.AUTH_VERIFICATION_TTL_SECONDS)
     const userId = randomUUID()
     const created = await this.repository.register({
@@ -60,7 +60,7 @@ export class AuthService {
     const user = await this.repository.findUserByEmail(email)
     let rawToken: string | undefined
     if (user?.status === 'pending_verification') {
-      rawToken = randomToken()
+      rawToken = randomOtp()
       const challenge = this.challenge(
         'verify_email',
         rawToken,

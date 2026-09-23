@@ -12,12 +12,13 @@ import { AppError } from '../../utils/errors.js'
 const EmailSchema = z.string().email().max(320)
 const PasswordSchema = z.string().min(1).max(1024)
 const TokenSchema = z.string().min(32).max(2048)
+const VerificationCodeSchema = z.string().regex(/^\d{6}$/)
 const RegisterSchema = z
   .object({ email: EmailSchema, password: PasswordSchema, termsVersion: z.string().min(1).max(50) })
   .strict()
 const LoginSchema = z.object({ email: EmailSchema, password: PasswordSchema }).strict()
 const EmailOnlySchema = z.object({ email: EmailSchema }).strict()
-const TokenOnlySchema = z.object({ token: TokenSchema }).strict()
+const VerificationCodeOnlySchema = z.object({ token: VerificationCodeSchema }).strict()
 const ResetSchema = z.object({ token: TokenSchema, newPassword: PasswordSchema }).strict()
 const ChangePasswordSchema = z
   .object({ currentPassword: PasswordSchema, newPassword: PasswordSchema })
@@ -57,7 +58,7 @@ export function authRouter(authService: AuthService, environment: Environment): 
     sensitiveLimit,
     asyncHandler(async (request, response) => {
       await authService.verifyEmail(
-        TokenOnlySchema.parse(request.body).token,
+        VerificationCodeOnlySchema.parse(request.body).token,
         requestContext(request, environment),
       )
       response.json({ success: true, data: { verified: true } })
