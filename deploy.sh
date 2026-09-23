@@ -80,7 +80,7 @@ AUTH_SMTP_PORT=465
 AUTH_SMTP_SECURE=true
 AUTH_SMTP_USER=no-reply@tsionmarket.com
 AUTH_SMTP_PASSWORD=
-AUTH_EMAIL_FROM=TsionMarket <no-reply@tsionmarket.com>
+AUTH_EMAIL_FROM="TsionMarket <no-reply@tsionmarket.com>"
 # Where verification and reset links point (your frontend, not the API).
 AUTH_EMAIL_LINK_BASE_URL=https://tsionmarket.com
 
@@ -112,25 +112,36 @@ EOF
 fi
 
 # ------------------------------------------------------------- sanity checks --
-set -a
-# shellcheck disable=SC1090
-source "$ENV_FILE"
-set +a
+# Read values WITHOUT sourcing. Sourcing runs the file as shell, so a perfectly
+# valid Compose value like `NAME=Tsion <no-reply@example.com>` would be parsed
+# as a command plus redirects. Compose's own parser has no such problem.
+env_value() {
+  sed -n "s/^[[:space:]]*$1=//p" "$ENV_FILE" \
+    | tail -n 1 \
+    | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/" \
+    | sed -e 's/[[:space:]]*$//'
+}
+
+ACME_EMAIL="$(env_value ACME_EMAIL)"
+CORS_ALLOWED_ORIGINS="$(env_value CORS_ALLOWED_ORIGINS)"
+API_DOMAIN="$(env_value API_DOMAIN)"
+API_LOCAL_PORT="$(env_value API_LOCAL_PORT)"
+AUTH_EMAIL_DELIVERY_MODE="$(env_value AUTH_EMAIL_DELIVERY_MODE)"
 
 missing=()
-[[ "${ACME_EMAIL:-}" == "CHANGE_ME@tsionmarket.com" || -z "${ACME_EMAIL:-}" ]] && missing+=(ACME_EMAIL)
-[[ -z "${CORS_ALLOWED_ORIGINS:-}" ]] && missing+=(CORS_ALLOWED_ORIGINS)
+[[ "$ACME_EMAIL" == "CHANGE_ME@tsionmarket.com" || -z "$ACME_EMAIL" ]] && missing+=(ACME_EMAIL)
+[[ -z "$CORS_ALLOWED_ORIGINS" ]] && missing+=(CORS_ALLOWED_ORIGINS)
 
 case "${AUTH_EMAIL_DELIVERY_MODE:-smtp}" in
   smtp)
-    [[ -z "${AUTH_SMTP_USER:-}" ]] && missing+=(AUTH_SMTP_USER)
-    [[ -z "${AUTH_SMTP_PASSWORD:-}" ]] && missing+=(AUTH_SMTP_PASSWORD)
-    [[ -z "${AUTH_EMAIL_FROM:-}" ]] && missing+=(AUTH_EMAIL_FROM)
-    [[ -z "${AUTH_EMAIL_LINK_BASE_URL:-}" ]] && missing+=(AUTH_EMAIL_LINK_BASE_URL)
+    [[ -z "$(env_value AUTH_SMTP_USER)" ]] && missing+=(AUTH_SMTP_USER)
+    [[ -z "$(env_value AUTH_SMTP_PASSWORD)" ]] && missing+=(AUTH_SMTP_PASSWORD)
+    [[ -z "$(env_value AUTH_EMAIL_FROM)" ]] && missing+=(AUTH_EMAIL_FROM)
+    [[ -z "$(env_value AUTH_EMAIL_LINK_BASE_URL)" ]] && missing+=(AUTH_EMAIL_LINK_BASE_URL)
     ;;
   http)
-    [[ -z "${AUTH_EMAIL_PROVIDER_URL:-}" ]] && missing+=(AUTH_EMAIL_PROVIDER_URL)
-    [[ -z "${AUTH_EMAIL_PROVIDER_API_KEY:-}" ]] && missing+=(AUTH_EMAIL_PROVIDER_API_KEY)
+    [[ -z "$(env_value AUTH_EMAIL_PROVIDER_URL)" ]] && missing+=(AUTH_EMAIL_PROVIDER_URL)
+    [[ -z "$(env_value AUTH_EMAIL_PROVIDER_API_KEY)" ]] && missing+=(AUTH_EMAIL_PROVIDER_API_KEY)
     ;;
   *)
     echo "AUTH_EMAIL_DELIVERY_MODE must be 'smtp' or 'http' in production." >&2
