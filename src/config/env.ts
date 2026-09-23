@@ -102,6 +102,11 @@ export const EnvironmentSchema = z
     SPOT_MARKET_REGISTRY_MAX_TOKENS_PER_ROUTE: z.coerce.number().int().min(1).max(5000).default(500),
     MARKET_STALE_AFTER_SECONDS: z.coerce.number().int().min(60).default(1800),
     JUPITER_API_KEY: z.string().optional(),
+    // Chart sources. Both optional: without a key the chart falls through to
+    // the next source rather than failing, so an unkeyed deployment still
+    // draws pool candles from GeckoTerminal, which needs none.
+    BIRDEYE_API_KEY: z.string().optional(),
+    COINGECKO_API_KEY: z.string().optional(),
     LIFI_API_URL: z.string().url().default('https://li.quest/v1'),
     LIFI_API_KEY: z.string().optional(),
     LIFI_INTEGRATOR: z

@@ -102,7 +102,11 @@ export class MarketRepository {
     }
     if (q.search) {
       where.push(`(m.base_symbol LIKE ? OR m.quote_symbol LIKE ?)`)
-      const s = `%${q.search.replace(/[\\%_]/g, '\\$&')}%`
+      // The symbol columns are ascii_bin, so LIKE compares case-sensitively.
+      // Upper-casing the needle rather than the column keeps idx_markets_search
+      // usable; MarketRegistryWorker upper-cases every symbol before it is
+      // stored, so the stored side is already normalised.
+      const s = `%${q.search.toUpperCase().replace(/[\\%_]/g, '\\$&')}%`
       params.push(s, s)
     }
     if (cursor) {

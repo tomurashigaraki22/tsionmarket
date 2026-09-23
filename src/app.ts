@@ -15,6 +15,7 @@ import { authenticationMiddleware } from './auth/middleware.js'
 import type { PortfolioRepository } from './portfolio/PortfolioRepository.js'
 import type { BalanceService } from './portfolio/BalanceService.js'
 import type { MarketRepository } from './markets/MarketRepository.js'
+import { ChartService } from './markets/ChartService.js'
 import { portfolioRouter } from './api/routes/portfolio.js'
 import { marketsRouter } from './api/routes/markets.js'
 import type { QuoteService } from './trading/QuoteService.js'
@@ -100,7 +101,14 @@ export function createApp({
   // The normalized, read-only catalogue powers the public landing page. All
   // execution endpoints remain behind the authenticated boundary below.
   if (marketRepository)
-    app.use('/v1', marketsRouter(marketRepository, environment.MARKET_STALE_AFTER_SECONDS))
+    app.use(
+      '/v1',
+      marketsRouter(
+        marketRepository,
+        environment.MARKET_STALE_AFTER_SECONDS,
+        new ChartService(environment),
+      ),
+    )
   if (authService) {
     app.use('/v1/auth', authRouter(authService, environment))
     // Future /v1 routers inherit a fail-closed authenticated boundary unless
