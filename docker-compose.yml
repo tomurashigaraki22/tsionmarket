@@ -1,0 +1,90 @@
+services:
+  mysql:
+    image: mysql:8.4.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-local-root-password-change-me}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-tsionmarket}
+      MYSQL_USER: ${MYSQL_USER:-tsionmarket_app}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-local-app-password-change-me}
+      TZ: UTC
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+00:00
+      - --sql-mode=STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+    ports:
+      - '${MYSQL_EXPOSED_PORT:-3306}:3306'
+    volumes:
+      - tsionmarket_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD-SHELL', 'mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  migrate:
+    build:
+      context: .
+      target: runtime
+    profiles: ['app']
+    environment: &app-environment
+      NODE_ENV: development
+      HOST: 0.0.0.0
+      PORT: 3030
+      TRUST_PROXY_HOPS: 0
+      LOG_LEVEL: info
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001}
+      JSON_BODY_LIMIT: 256kb
+      RATE_LIMIT_WINDOW_MS: 60000
+      RATE_LIMIT_MAX: 120
+      AUTH_BYPASS_ENABLED: 'false'
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-tsionmarket}
+      MYSQL_USER: ${MYSQL_USER:-tsionmarket_app}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-local-app-password-change-me}
+      MYSQL_CONNECTION_LIMIT: 10
+      MYSQL_QUEUE_LIMIT: 100
+      MYSQL_CONNECT_TIMEOUT_MS: 10000
+      MYSQL_ACQUIRE_TIMEOUT_MS: 10000
+      MYSQL_QUERY_TIMEOUT_MS: 10000
+      MYSQL_MIGRATION_USER: root
+      MYSQL_MIGRATION_PASSWORD: ${MYSQL_ROOT_PASSWORD:-local-root-password-change-me}
+      MYSQL_MIGRATION_LOCK_TIMEOUT_SECONDS: 30
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: ['node', 'dist/db/migrate.js']
+    restart: 'no'
+
+  api:
+    build:
+      context: .
+      target: runtime
+    profiles: ['app']
+    restart: unless-stopped
+    environment: *app-environment
+    ports:
+      - '${API_EXPOSED_PORT:-3030}:3030'
+    depends_on:
+      mysql:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3030/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  tsionmarket_mysql_data:

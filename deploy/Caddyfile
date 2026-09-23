@@ -1,0 +1,32 @@
+# Automatic Let's Encrypt TLS for api.tsionmarket.com.
+# Caddy obtains and renews the certificate on its own once the DNS A record
+# points at this server and ports 80/443 are reachable.
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$API_DOMAIN} {
+	encode zstd gzip
+
+	# The API sets its own security headers via helmet; add HSTS at the edge.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	# Keep the metrics endpoint off the public internet.
+	@metrics path /metrics
+	respond @metrics 404
+
+	reverse_proxy api:3456 {
+		health_uri /health
+		health_interval 10s
+		health_timeout 5s
+
+		# The API trusts exactly one proxy hop (TRUST_PROXY_HOPS=1) and reads
+		# the client IP from these headers.
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+}

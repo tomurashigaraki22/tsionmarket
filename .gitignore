@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+.env
+# Generated deployment secrets — never commit.
+deploy/.env
+*.log
+.DS_Store
