@@ -14,6 +14,16 @@ export const transactionHistoryQuerySchema = z
     cursor: z.string().max(1000).optional(),
   })
   .strict()
+export const transactionStreamQuerySchema = z.object({ since: z.string().datetime().optional() }).strict()
+
+// Polling interval for the SSE loop below. changesSince() is a cheap indexed
+// query (user_id, updated_at), so per-connection polling is fine at this
+// cadence and needs no message bus. If the API ever runs more than one
+// instance this stays correct — every instance polls the same database row
+// set — it just adds up to N redundant polls per connected user.
+const STREAM_POLL_MS = 2_000
+const STREAM_HEARTBEAT_MS = 15_000
+
 export function transactionsRouter(service: TransactionService, repo: TransactionRepository) {
   const router = Router(),
     submitLimit = rateLimit({ windowMs: 60_000, limit: 20, standardHeaders: 'draft-7', legacyHeaders: false })
@@ -50,6 +60,58 @@ export function transactionsRouter(service: TransactionService, repo: Transactio
       )
       if (!record) throw new AppError('TRANSACTION_NOT_FOUND', 'Transaction not found', 404)
       res.json({ success: true, data: record })
+    }),
+  )
+  // Authenticated the same way as every other /v1 route: the Authorization
+  // Bearer header, via the authenticationMiddleware this router is mounted
+  // behind. Native EventSource cannot send that header, so the frontend must
+  // use a fetch-based SSE client rather than `new EventSource(...)` — see
+  // src/lib/api/stream.ts. This was chosen over a short-lived stream-ticket
+  // endpoint because it introduces no new credential type or issuance/replay
+  // surface, and over loosening cookie SameSite policy because that would
+  // weaken CSRF protection for every route to support one endpoint.
+  router.get(
+    '/transactions/stream',
+    asyncHandler(async (req, res) => {
+      const userId = requireIdentity(req).userId
+      const query = transactionStreamQuerySchema.parse(req.query)
+      let cursor = query.since ? new Date(query.since) : new Date()
+
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache, no-transform',
+        connection: 'keep-alive',
+        'x-accel-buffering': 'no',
+      })
+      res.write(`retry: 3000\n\n`)
+
+      let closed = false
+      req.on('close', () => {
+        closed = true
+      })
+
+      const heartbeat = setInterval(() => {
+        if (!closed) res.write(`:hb\n\n`)
+      }, STREAM_HEARTBEAT_MS)
+
+      try {
+        while (!closed) {
+          const changes = await repo.changesSince(userId, cursor)
+          for (const change of changes as Array<{ updatedAt: string | Date }>) {
+            res.write(`id: ${new Date(change.updatedAt).toISOString()}\n`)
+            res.write(`event: transaction\n`)
+            res.write(`data: ${JSON.stringify(change)}\n\n`)
+          }
+          if (changes.length > 0) {
+            const last = changes[changes.length - 1] as { updatedAt: string | Date }
+            cursor = new Date(last.updatedAt)
+          }
+          await new Promise((resolve) => setTimeout(resolve, STREAM_POLL_MS))
+        }
+      } finally {
+        clearInterval(heartbeat)
+        res.end()
+      }
     }),
   )
   return router

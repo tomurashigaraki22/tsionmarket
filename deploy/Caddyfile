@@ -7,7 +7,11 @@
 }
 
 {$API_DOMAIN} {
-	encode zstd gzip
+	# gzip buffers output before flushing, which would delay SSE events behind
+	# the compressor's buffer instead of delivering them as they're written.
+	# The transaction stream is excluded so it reaches the browser immediately.
+	@stream path /v1/transactions/stream
+	encode @!stream zstd gzip
 
 	# The API sets its own security headers via helmet; add HSTS at the edge.
 	header {
@@ -23,6 +27,10 @@
 		health_uri /health
 		health_interval 10s
 		health_timeout 5s
+
+		# Flush every write immediately rather than batching — required for the
+		# SSE stream to deliver events as they happen, not once a buffer fills.
+		flush_interval -1
 
 		# The API trusts exactly one proxy hop (TRUST_PROXY_HOPS=1) and reads
 		# the client IP from these headers.
