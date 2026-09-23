@@ -85,7 +85,7 @@ AUTH_EMAIL_FROM="TsionMarket <no-reply@tsionmarket.com>"
 AUTH_EMAIL_LINK_BASE_URL=https://tsionmarket.com
 
 # Mainnet RPC endpoints (comma separated lists are tried in order).
-NETWORK_MODE=production
+NETWORK_MODE=mainnet
 ETHEREUM_RPC_URLS=
 ARBITRUM_RPC_URLS=
 SOLANA_MAINNET_RPC_URLS=

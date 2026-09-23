@@ -228,8 +228,31 @@ export const EnvironmentSchema = z
 
 export type Environment = z.infer<typeof EnvironmentSchema>
 
+/**
+ * Normalises raw environment input before validation:
+ *
+ * - Strips trailing CR/LF. A `.env` saved with Windows line endings yields
+ *   values like `https://example.com\r`, which fail URL validation with a
+ *   message that points nowhere useful.
+ * - Treats an empty value as unset. Compose substitutes unused optionals as
+ *   empty strings (`${FOO:-}`), and `''` is not `undefined`, so optional URL
+ *   and non-empty-string fields would reject it instead of falling back.
+ *
+ * Interior and leading whitespace is preserved — it can be meaningful in a
+ * password.
+ */
+function normaliseEnvironment(input: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const output: NodeJS.ProcessEnv = {}
+  for (const [key, value] of Object.entries(input)) {
+    if (typeof value !== 'string') continue
+    const cleaned = value.replace(/[\r\n]+$/, '')
+    if (cleaned !== '') output[key] = cleaned
+  }
+  return output
+}
+
 export function parseEnvironment(input: NodeJS.ProcessEnv): Environment {
-  const parsed = EnvironmentSchema.safeParse(input)
+  const parsed = EnvironmentSchema.safeParse(normaliseEnvironment(input))
   if (!parsed.success) {
     const details = parsed.error.issues
       .map((issue) => `${issue.path.join('.') || 'environment'}: ${issue.message}`)
