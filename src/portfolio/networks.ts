@@ -10,6 +10,7 @@ export type Network = {
   nativeSymbol: string
   nativeDecimals: number
   rpcKeys: (keyof Environment)[]
+  explorer: { name: string; txTemplate: string; addressTemplate: string }
 }
 
 export const NETWORKS: Network[] = [
@@ -22,6 +23,11 @@ export const NETWORKS: Network[] = [
     nativeSymbol: 'ETH',
     nativeDecimals: 18,
     rpcKeys: ['ETHEREUM_SEPOLIA_RPC_URL', 'ETHEREUM_SEPOLIA_FALLBACK_RPC_URL'],
+    explorer: {
+      name: 'Etherscan',
+      txTemplate: 'https://sepolia.etherscan.io/tx/{hash}',
+      addressTemplate: 'https://sepolia.etherscan.io/address/{address}',
+    },
   },
   {
     networkId: 'arbitrum-sepolia',
@@ -32,6 +38,11 @@ export const NETWORKS: Network[] = [
     nativeSymbol: 'ETH',
     nativeDecimals: 18,
     rpcKeys: ['ARBITRUM_SEPOLIA_RPC_URL', 'ARBITRUM_SEPOLIA_FALLBACK_RPC_URL'],
+    explorer: {
+      name: 'Arbiscan',
+      txTemplate: 'https://sepolia.arbiscan.io/tx/{hash}',
+      addressTemplate: 'https://sepolia.arbiscan.io/address/{address}',
+    },
   },
   {
     networkId: 'solana-devnet',
@@ -42,6 +53,11 @@ export const NETWORKS: Network[] = [
     nativeSymbol: 'SOL',
     nativeDecimals: 9,
     rpcKeys: ['SOLANA_RPC_URL', 'SOLANA_FALLBACK_RPC_URL'],
+    explorer: {
+      name: 'Solana Explorer',
+      txTemplate: 'https://explorer.solana.com/tx/{hash}?cluster=devnet',
+      addressTemplate: 'https://explorer.solana.com/address/{address}?cluster=devnet',
+    },
   },
   {
     networkId: 'ethereum-mainnet',
@@ -52,6 +68,11 @@ export const NETWORKS: Network[] = [
     nativeSymbol: 'ETH',
     nativeDecimals: 18,
     rpcKeys: ['ETHEREUM_RPC_URLS', 'ETHEREUM_RPC_URL', 'ETHEREUM_FALLBACK_RPC_URL'],
+    explorer: {
+      name: 'Etherscan',
+      txTemplate: 'https://etherscan.io/tx/{hash}',
+      addressTemplate: 'https://etherscan.io/address/{address}',
+    },
   },
   {
     networkId: 'arbitrum-one',
@@ -62,6 +83,11 @@ export const NETWORKS: Network[] = [
     nativeSymbol: 'ETH',
     nativeDecimals: 18,
     rpcKeys: ['ARBITRUM_RPC_URLS', 'ARBITRUM_RPC_URL', 'ARBITRUM_FALLBACK_RPC_URL'],
+    explorer: {
+      name: 'Arbiscan',
+      txTemplate: 'https://arbiscan.io/tx/{hash}',
+      addressTemplate: 'https://arbiscan.io/address/{address}',
+    },
   },
   {
     networkId: 'solana-mainnet-beta',
@@ -72,6 +98,11 @@ export const NETWORKS: Network[] = [
     nativeSymbol: 'SOL',
     nativeDecimals: 9,
     rpcKeys: ['SOLANA_MAINNET_RPC_URLS', 'SOLANA_MAINNET_RPC_URL'],
+    explorer: {
+      name: 'Solana Explorer',
+      txTemplate: 'https://explorer.solana.com/tx/{hash}',
+      addressTemplate: 'https://explorer.solana.com/address/{address}',
+    },
   },
 ]
 

@@ -64,7 +64,7 @@ Email verification accepts a six-digit OTP, not a link. Login is rejected until 
 
 ## Networks and portfolio
 
-`GET /v1/networks` returns records containing `networkId`, `family`, `name`, `environment`, optional `chainId`/`cluster`, `nativeSymbol`, `nativeDecimals`, and `capabilities`.
+`GET /v1/networks` returns records containing `networkId`, `family`, `name`, `environment`, optional `chainId`/`cluster`, `nativeSymbol`, `nativeDecimals`, trusted explorer templates, and explicit `capabilities` flags for balance reads, quotes, intents, submission, and sponsorship. Only enabled networks are returned.
 
 `GET /v1/wallets/me/accounts` returns `{ id, networkId, address, family }[]`.
 
@@ -96,7 +96,7 @@ Email verification accepts a six-digit OTP, not a link. Login is rejected until 
 
 `GET /v1/portfolio/valuation/history?limit=30` accepts 1–100 and returns chronological `{ asOf, totalValueUsd, pricedValueUsd, unpricedAssetCount }[]` points.
 
-`GET /v1/capabilities` returns chain adapters, sponsorship availability, advanced-order availability/reason, and transaction-stream transport/path. UI availability must follow these flags.
+`GET /v1/capabilities` returns chain adapters, sponsorship availability, advanced-order availability/reason, transaction-stream transport/path, and live quote/intent pause controls. UI availability must follow these flags.
 
 ## Stable error behavior
 

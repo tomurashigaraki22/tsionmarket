@@ -114,4 +114,41 @@ describe('authentication routes', () => {
     expect(response.status).toBe(401)
     expect(response.body.error.code).toBe('AUTH_REQUIRED')
   })
+
+  it('binds session revocation to the authenticated user identity', async () => {
+    const revokeSession = vi.fn().mockResolvedValue(undefined)
+    const { app } = appWithAuth({ revokeSession })
+    const sessionId = 'a3152186-401f-4c58-bd49-c0615765683f'
+    const response = await request(app)
+      .delete(`/v1/auth/sessions/${sessionId}`)
+      .set('Authorization', 'Bearer signed-access-token')
+    expect(response.status).toBe(200)
+    expect(revokeSession).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: '74ea7c09-27c0-46d1-9f06-653e08740613' }),
+      sessionId,
+      expect.any(Object),
+    )
+  })
+
+  it('changes a password and requires reauthentication', async () => {
+    const changePassword = vi.fn().mockResolvedValue(undefined)
+    const { app } = appWithAuth({ changePassword })
+    const response = await request(app)
+      .post('/v1/auth/change-password')
+      .set('Authorization', 'Bearer signed-access-token')
+      .send({ currentPassword: 'old password value', newPassword: 'new password value' })
+    expect(response.status).toBe(200)
+    expect(response.body.data).toEqual({ changed: true, reauthenticationRequired: true })
+    expect(changePassword).toHaveBeenCalledOnce()
+  })
+
+  it('keeps password recovery enumeration-safe', async () => {
+    const forgotPassword = vi.fn().mockResolvedValue({ accepted: true })
+    const { app } = appWithAuth({ forgotPassword })
+    const response = await request(app)
+      .post('/v1/auth/forgot-password')
+      .send({ email: 'unknown@example.com' })
+    expect(response.status).toBe(202)
+    expect(response.body.data).toEqual({ accepted: true })
+  })
 })

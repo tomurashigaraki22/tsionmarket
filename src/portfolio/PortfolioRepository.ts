@@ -1,5 +1,6 @@
 import type { Pool, RowDataPacket } from 'mysql2/promise'
 import { randomUUID } from 'node:crypto'
+import { NETWORKS } from './networks.js'
 
 export type Account = { id: string; networkId: string; address: string; family: 'evm' | 'solana' }
 export class PortfolioRepository {
@@ -23,7 +24,22 @@ export class PortfolioRepository {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT network_id AS networkId,family,name,environment,chain_id AS chainId,cluster,native_symbol AS nativeSymbol,native_decimals AS nativeDecimals,capabilities FROM networks WHERE enabled=TRUE ORDER BY sort_order`,
     )
-    return rows
+    return rows.map((row) => {
+      const configured = NETWORKS.find((network) => network.networkId === row.networkId)
+      const stored = (row.capabilities ?? {}) as Record<string, unknown>
+      return {
+        ...row,
+        capabilities: {
+          enabled: true,
+          balanceReads: stored.balance === true,
+          quotes: true,
+          intents: true,
+          submission: true,
+          sponsorship: false,
+        },
+        explorer: configured?.explorer ?? null,
+      }
+    })
   }
   async applyNetworkMode(mode: 'development' | 'testnet' | 'mainnet') {
     const environments =

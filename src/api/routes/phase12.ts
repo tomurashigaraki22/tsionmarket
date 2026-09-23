@@ -31,20 +31,27 @@ export function phase12Router(valuations: ValuationService, transactions: Transa
       }),
     ),
   )
-  router.get('/capabilities', (_req, res) =>
-    res.json({
-      success: true,
-      data: {
-        chainAdapters: chainAdapters.list(),
-        sponsorship: sponsorshipProviders.config(),
-        advancedOrders: {
-          enabled: false,
-          reason:
-            'No provider with defined cancellation, partial-fill, and settlement semantics is configured',
+  router.get(
+    '/capabilities',
+    asyncHandler(async (_req, res) =>
+      res.json({
+        success: true,
+        data: {
+          chainAdapters: chainAdapters.list(),
+          sponsorship: sponsorshipProviders.config(),
+          advancedOrders: {
+            enabled: false,
+            reason:
+              'No provider with defined cancellation, partial-fill, and settlement semantics is configured',
+          },
+          transactionStream: { transport: 'sse', path: '/v1/transactions/stream' },
+          execution: {
+            quotesPaused: await transactions.control('quotes_paused'),
+            intentCreationPaused: await transactions.control('intent_creation_paused'),
+          },
         },
-        transactionStream: { transport: 'sse', path: '/v1/transactions/stream' },
-      },
-    }),
+      }),
+    ),
   )
   router.get('/transactions/stream', (req, res) => {
     const userId = requireIdentity(req).userId

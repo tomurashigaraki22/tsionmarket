@@ -72,5 +72,8 @@ export class SponsorshipRegistry {
 export const chainAdapters = new ChainAdapterRegistry(),
   sessionAuthorities = new SessionAuthorityRegistry(),
   sponsorshipProviders = new SponsorshipRegistry()
-chainAdapters.register({ family: 'evm', networks: ['ethereum-mainnet', 'arbitrum-one'] })
-chainAdapters.register({ family: 'solana', networks: ['solana-mainnet-beta'] })
+chainAdapters.register({
+  family: 'evm',
+  networks: ['ethereum-sepolia', 'arbitrum-sepolia', 'ethereum-mainnet', 'arbitrum-one'],
+})
+chainAdapters.register({ family: 'solana', networks: ['solana-devnet', 'solana-mainnet-beta'] })
