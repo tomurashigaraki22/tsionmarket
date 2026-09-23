@@ -2,6 +2,14 @@ import { z } from 'zod'
 
 const booleanFromEnvironment = z.enum(['true', 'false']).transform((value) => value === 'true')
 
+// Whitespace is never meaningful in a URL, and stray spaces are easy to
+// introduce when hand-editing a .env. Trim before validating so the failure is
+// about a genuinely wrong value rather than an invisible character.
+const optionalUrl = z.preprocess(
+  (value) => (typeof value === 'string' ? value.trim() : value),
+  z.string().url().optional(),
+)
+
 const commaSeparatedOrigins = z
   .string()
   .transform((value) =>
@@ -55,7 +63,7 @@ export const EnvironmentSchema = z
       .default('tsion_csrf'),
     AUTH_COOKIE_DOMAIN: z.string().min(1).optional(),
     AUTH_EMAIL_DELIVERY_MODE: z.enum(['console', 'http', 'smtp']).default('console'),
-    AUTH_EMAIL_PROVIDER_URL: z.string().url().optional(),
+    AUTH_EMAIL_PROVIDER_URL: optionalUrl,
     AUTH_EMAIL_PROVIDER_API_KEY: z.string().min(1).optional(),
     AUTH_SMTP_HOST: z.string().min(1).optional(),
     AUTH_SMTP_PORT: z.coerce.number().int().min(1).max(65_535).default(465),
@@ -66,7 +74,7 @@ export const EnvironmentSchema = z
     // Envelope sender, e.g. "TsionMarket <no-reply@tsionmarket.com>".
     AUTH_EMAIL_FROM: z.string().min(1).optional(),
     // Base URL for the verification and reset links placed in email bodies.
-    AUTH_EMAIL_LINK_BASE_URL: z.string().url().optional(),
+    AUTH_EMAIL_LINK_BASE_URL: optionalUrl,
     NETWORK_MODE: z.enum(['development', 'testnet', 'mainnet']).default('development'),
     ETHEREUM_SEPOLIA_RPC_URL: z.string().optional(),
     ETHEREUM_SEPOLIA_FALLBACK_RPC_URL: z.string().optional(),
