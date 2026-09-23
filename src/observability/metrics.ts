@@ -6,11 +6,32 @@ const counters = new Map<string, number>(),
 const safe = (value: string) => value.replace(/[^a-zA-Z0-9_]/g, '_')
 export const increment = (name: string, amount = 1) =>
   counters.set(safe(name), (counters.get(safe(name)) ?? 0) + amount)
+
+/**
+ * The normalized route pattern (e.g. `/v1/transactions/:transactionId`), not
+ * the literal request path. `req.path` for that same request would contain
+ * the actual transaction UUID — a distinct string per transaction ever
+ * requested — which would give this in-memory, never-evicted Map one entry
+ * per UUID/address/cursor ever seen rather than one per route. That is an
+ * unbounded memory leak and it defeats the point of the metric, which is
+ * "latency and error rate by route" per Phase 13, not by individual resource.
+ *
+ * Express only populates `req.route` once a route has matched, which happens
+ * before `res.on('finish')` fires below, so it's available by read time. A
+ * request that never matched a route (a 404, or one rejected in earlier
+ * middleware) falls back to a fixed label instead of the raw path.
+ */
+function normalizedRoute(req: Parameters<RequestHandler>[0]): string {
+  const pattern = (req as { route?: { path?: string } }).route?.path
+  if (typeof pattern === 'string') return safe(`${req.baseUrl}${pattern}`)
+  return 'unmatched'
+}
+
 export function metricsMiddleware(): RequestHandler {
   return (req, res, next) => {
     const started = performance.now()
     res.on('finish', () => {
-      const route = safe(req.path),
+      const route = normalizedRoute(req),
         key = `http_requests_total_${req.method}_${route}_${res.statusCode}`
       increment(key)
       const durationKey = `http_request_duration_ms_${req.method}_${route}`,
