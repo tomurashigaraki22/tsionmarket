@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument -- direct SQL SSE rows are normalized at the stream boundary */
 import { Router } from 'express'
 import { z } from 'zod'
 import { requireIdentity } from '../../auth/middleware.js'
@@ -53,40 +52,9 @@ export function phase12Router(valuations: ValuationService, transactions: Transa
       }),
     ),
   )
-  router.get('/transactions/stream', (req, res) => {
-    const userId = requireIdentity(req).userId
-    res.status(200).set({
-      'content-type': 'text/event-stream',
-      'cache-control': 'no-cache, no-transform',
-      connection: 'keep-alive',
-      'x-accel-buffering': 'no',
-    })
-    res.flushHeaders()
-    let cursor = new Date(),
-      closed = false
-    const send = async () => {
-      if (closed) return
-      const rows = await transactions.changesSince(userId, cursor)
-      for (const row of rows) {
-        const updated = new Date(row.updatedAt)
-        if (updated > cursor) cursor = updated
-        res.write(`id: ${String(row.id)}\nevent: transaction\ndata: ${JSON.stringify(row)}\n\n`)
-      }
-      res.write(`: heartbeat ${Date.now()}\n\n`)
-    }
-    const timer = setInterval(
-      () => void send().catch(() => res.write(`event: unavailable\ndata: {"retry":true}\n\n`)),
-      5000,
-    )
-    timer.unref()
-    const maximum = setTimeout(() => res.end(), 5 * 60_000)
-    maximum.unref()
-    req.on('close', () => {
-      closed = true
-      clearInterval(timer)
-      clearTimeout(maximum)
-    })
-    res.write(`event: ready\ndata: {"connected":true}\n\n`)
-  })
+  // '/transactions/stream' is served by transactionsRouter, which app.ts
+  // mounts first. A second handler for the same path lived here and was
+  // unreachable; it is not re-added, so mount order cannot silently change
+  // which implementation answers.
   return router
 }

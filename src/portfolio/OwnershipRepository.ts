@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Pool, RowDataPacket } from 'mysql2/promise'
 import { withTransaction } from '../db/transaction.js'
+import { fromMysqlDateTime } from '../db/datetime.js'
 import { AppError } from '../utils/errors.js'
 
 export type OwnershipChallenge = {
@@ -33,8 +34,11 @@ export class OwnershipRepository {
         challenge.nonce,
         challenge.statement,
         challenge.signatureScheme,
-        challenge.issuedAt,
-        challenge.expiresAt,
+        // Date objects, not the ISO strings the challenge carries: MySQL
+        // rejects '...T...Z' for a DATETIME column under STRICT_TRANS_TABLES.
+        // mysql2 serialises a Date with the pool's timezone ('Z' = UTC).
+        new Date(challenge.issuedAt),
+        new Date(challenge.expiresAt),
       ],
     )
   }
@@ -73,7 +77,7 @@ export class OwnershipRepository {
       const challenge = rows[0] as OwnershipChallenge | undefined
       if (!challenge || challenge.consumedAt)
         throw new AppError('OWNERSHIP_CHALLENGE_INVALID', 'Ownership challenge is invalid', 400)
-      if (new Date(challenge.expiresAt).getTime() <= Date.now())
+      if (fromMysqlDateTime(challenge.expiresAt).getTime() <= Date.now())
         throw new AppError('OWNERSHIP_CHALLENGE_EXPIRED', 'Ownership challenge has expired', 400)
       if (challenge.networkId !== input.networkId || challenge.address !== input.address)
         throw new AppError('OWNERSHIP_PROOF_MISMATCH', 'Proof does not match the challenge', 400)

@@ -2,8 +2,10 @@ import { randomUUID } from 'node:crypto'
 import type { Pool, RowDataPacket } from 'mysql2/promise'
 import type { BalanceService } from './BalanceService.js'
 import { Decimal } from 'decimal.js'
+import { fromMysqlDateTime } from '../db/datetime.js'
 
-type Price = { networkId: string; token: string; symbol: string; priceUsd: string; asOf: Date }
+// asOf is a string, not a Date: the pool runs with dateStrings: true.
+type Price = { networkId: string; token: string; symbol: string; priceUsd: string; asOf: string }
 const nativeToken: Record<string, string> = {
   'ethereum-mainnet': '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
   'arbitrum-one': '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
@@ -53,12 +55,14 @@ export class ValuationService {
           decimals: asset.decimals,
           priceUsd: price.priceUsd,
           valueUsd: value.toFixed(8),
-          priceAsOf: price.asOf.toISOString(),
+          priceAsOf: fromMysqlDateTime(price.asOf).toISOString(),
           provenance: 'spot_market_registry',
         })
       }
     const total = values.reduce((sum, value) => sum.add(value), new Decimal(0)).toFixed(8),
-      priceAsOf = prices.length ? new Date(Math.min(...prices.map((price) => price.asOf.getTime()))) : null,
+      priceAsOf = prices.length
+        ? new Date(Math.min(...prices.map((price) => fromMysqlDateTime(price.asOf).getTime())))
+        : null,
       result = {
         currency: 'USD' as const,
         decimalPrecision: 8,

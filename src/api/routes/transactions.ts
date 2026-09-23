@@ -51,17 +51,10 @@ export function transactionsRouter(service: TransactionService, repo: Transactio
       })
     }),
   )
-  router.get(
-    '/transactions/:transactionId',
-    asyncHandler(async (req, res) => {
-      const record = await repo.get(
-        requireIdentity(req).userId,
-        z.string().uuid().parse(req.params.transactionId),
-      )
-      if (!record) throw new AppError('TRANSACTION_NOT_FOUND', 'Transaction not found', 404)
-      res.json({ success: true, data: record })
-    }),
-  )
+  // Registered before '/transactions/:transactionId'. Express matches in
+  // registration order, so the parameterised route would otherwise capture
+  // this path and reject 'stream' as a malformed transaction UUID.
+  //
   // Authenticated the same way as every other /v1 route: the Authorization
   // Bearer header, via the authenticationMiddleware this router is mounted
   // behind. Native EventSource cannot send that header, so the frontend must
@@ -112,6 +105,17 @@ export function transactionsRouter(service: TransactionService, repo: Transactio
         clearInterval(heartbeat)
         res.end()
       }
+    }),
+  )
+  router.get(
+    '/transactions/:transactionId',
+    asyncHandler(async (req, res) => {
+      const record = await repo.get(
+        requireIdentity(req).userId,
+        z.string().uuid().parse(req.params.transactionId),
+      )
+      if (!record) throw new AppError('TRANSACTION_NOT_FOUND', 'Transaction not found', 404)
+      res.json({ success: true, data: record })
     }),
   )
   return router
