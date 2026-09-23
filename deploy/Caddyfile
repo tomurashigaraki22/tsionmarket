@@ -10,8 +10,10 @@
 	# gzip buffers output before flushing, which would delay SSE events behind
 	# the compressor's buffer instead of delivering them as they're written.
 	# The transaction stream is excluded so it reaches the browser immediately.
-	@stream path /v1/transactions/stream
-	encode @!stream zstd gzip
+	@notstream {
+		not path /v1/transactions/stream
+	}
+	encode @notstream zstd gzip
 
 	# The API sets its own security headers via helmet; add HSTS at the edge.
 	header {
