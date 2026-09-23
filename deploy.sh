@@ -72,9 +72,17 @@ AUTH_CHALLENGE_PEPPER=$(secret)
 METRICS_BEARER_TOKEN=$(secret)
 
 # --- must be filled in before the API will start ---
-# Production refuses console email delivery.
-AUTH_EMAIL_PROVIDER_URL=
-AUTH_EMAIL_PROVIDER_API_KEY=
+# Email via Hostinger SMTP. Create the mailbox in hPanel > Emails first.
+# Port 465 = implicit TLS (AUTH_SMTP_SECURE=true). Use 587 with false instead.
+AUTH_EMAIL_DELIVERY_MODE=smtp
+AUTH_SMTP_HOST=smtp.hostinger.com
+AUTH_SMTP_PORT=465
+AUTH_SMTP_SECURE=true
+AUTH_SMTP_USER=no-reply@tsionmarket.com
+AUTH_SMTP_PASSWORD=
+AUTH_EMAIL_FROM=TsionMarket <no-reply@tsionmarket.com>
+# Where verification and reset links point (your frontend, not the API).
+AUTH_EMAIL_LINK_BASE_URL=https://tsionmarket.com
 
 # Mainnet RPC endpoints (comma separated lists are tried in order).
 NETWORK_MODE=production
@@ -94,7 +102,8 @@ Created $ENV_FILE with generated secrets.
 Before deploying, edit it and set:
   ACME_EMAIL                    a real mailbox for certificate notices
   CORS_ALLOWED_ORIGINS          your frontend origin(s)
-  AUTH_EMAIL_PROVIDER_URL       + API key — production will not boot without them
+  AUTH_SMTP_PASSWORD            Hostinger mailbox password (hPanel > Emails)
+  AUTH_SMTP_USER / _FROM        adjust if your mailbox is not no-reply@
   *_RPC_URLS                    mainnet RPC endpoints
 
 Then point DNS at this server and run ./deploy.sh again.
@@ -110,9 +119,24 @@ set +a
 
 missing=()
 [[ "${ACME_EMAIL:-}" == "CHANGE_ME@tsionmarket.com" || -z "${ACME_EMAIL:-}" ]] && missing+=(ACME_EMAIL)
-[[ -z "${AUTH_EMAIL_PROVIDER_URL:-}" ]] && missing+=(AUTH_EMAIL_PROVIDER_URL)
-[[ -z "${AUTH_EMAIL_PROVIDER_API_KEY:-}" ]] && missing+=(AUTH_EMAIL_PROVIDER_API_KEY)
 [[ -z "${CORS_ALLOWED_ORIGINS:-}" ]] && missing+=(CORS_ALLOWED_ORIGINS)
+
+case "${AUTH_EMAIL_DELIVERY_MODE:-smtp}" in
+  smtp)
+    [[ -z "${AUTH_SMTP_USER:-}" ]] && missing+=(AUTH_SMTP_USER)
+    [[ -z "${AUTH_SMTP_PASSWORD:-}" ]] && missing+=(AUTH_SMTP_PASSWORD)
+    [[ -z "${AUTH_EMAIL_FROM:-}" ]] && missing+=(AUTH_EMAIL_FROM)
+    [[ -z "${AUTH_EMAIL_LINK_BASE_URL:-}" ]] && missing+=(AUTH_EMAIL_LINK_BASE_URL)
+    ;;
+  http)
+    [[ -z "${AUTH_EMAIL_PROVIDER_URL:-}" ]] && missing+=(AUTH_EMAIL_PROVIDER_URL)
+    [[ -z "${AUTH_EMAIL_PROVIDER_API_KEY:-}" ]] && missing+=(AUTH_EMAIL_PROVIDER_API_KEY)
+    ;;
+  *)
+    echo "AUTH_EMAIL_DELIVERY_MODE must be 'smtp' or 'http' in production." >&2
+    exit 1
+    ;;
+esac
 
 if ((${#missing[@]})); then
   echo "These values in $ENV_FILE still need to be set:" >&2

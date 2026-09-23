@@ -54,9 +54,19 @@ export const EnvironmentSchema = z
       .regex(/^[a-zA-Z0-9_-]+$/)
       .default('tsion_csrf'),
     AUTH_COOKIE_DOMAIN: z.string().min(1).optional(),
-    AUTH_EMAIL_DELIVERY_MODE: z.enum(['console', 'http']).default('console'),
+    AUTH_EMAIL_DELIVERY_MODE: z.enum(['console', 'http', 'smtp']).default('console'),
     AUTH_EMAIL_PROVIDER_URL: z.string().url().optional(),
     AUTH_EMAIL_PROVIDER_API_KEY: z.string().min(1).optional(),
+    AUTH_SMTP_HOST: z.string().min(1).optional(),
+    AUTH_SMTP_PORT: z.coerce.number().int().min(1).max(65_535).default(465),
+    // Port 465 is implicit TLS. Port 587 is STARTTLS and needs this false.
+    AUTH_SMTP_SECURE: booleanFromEnvironment.default('true'),
+    AUTH_SMTP_USER: z.string().min(1).optional(),
+    AUTH_SMTP_PASSWORD: z.string().min(1).optional(),
+    // Envelope sender, e.g. "TsionMarket <no-reply@tsionmarket.com>".
+    AUTH_EMAIL_FROM: z.string().min(1).optional(),
+    // Base URL for the verification and reset links placed in email bodies.
+    AUTH_EMAIL_LINK_BASE_URL: z.string().url().optional(),
     NETWORK_MODE: z.enum(['development', 'testnet', 'mainnet']).default('development'),
     ETHEREUM_SEPOLIA_RPC_URL: z.string().optional(),
     ETHEREUM_SEPOLIA_FALLBACK_RPC_URL: z.string().optional(),
@@ -151,15 +161,38 @@ export const EnvironmentSchema = z
           message: 'Development authentication secrets are forbidden outside local/test',
         })
       }
-      if (
-        value.AUTH_EMAIL_DELIVERY_MODE !== 'http' ||
-        !value.AUTH_EMAIL_PROVIDER_URL ||
-        !value.AUTH_EMAIL_PROVIDER_API_KEY
-      ) {
+      // Real delivery is mandatory outside local/test: either an HTTP provider
+      // or SMTP, each fully configured. Console delivery drops mail silently.
+      if (value.AUTH_EMAIL_DELIVERY_MODE === 'http') {
+        if (!value.AUTH_EMAIL_PROVIDER_URL || !value.AUTH_EMAIL_PROVIDER_API_KEY) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['AUTH_EMAIL_PROVIDER_URL'],
+            message: 'HTTP email delivery requires provider URL and API key outside local/test',
+          })
+        }
+      } else if (value.AUTH_EMAIL_DELIVERY_MODE === 'smtp') {
+        const missing = (
+          [
+            ['AUTH_SMTP_HOST', value.AUTH_SMTP_HOST],
+            ['AUTH_SMTP_USER', value.AUTH_SMTP_USER],
+            ['AUTH_SMTP_PASSWORD', value.AUTH_SMTP_PASSWORD],
+            ['AUTH_EMAIL_FROM', value.AUTH_EMAIL_FROM],
+            ['AUTH_EMAIL_LINK_BASE_URL', value.AUTH_EMAIL_LINK_BASE_URL],
+          ] as const
+        ).filter(([, setting]) => !setting)
+        for (const [path] of missing) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [path],
+            message: 'SMTP email delivery requires this value outside local/test',
+          })
+        }
+      } else {
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['AUTH_EMAIL_DELIVERY_MODE'],
-          message: 'HTTP email delivery with URL and API key is required outside local/test',
+          message: 'Email delivery must be "http" or "smtp" outside local/test',
         })
       }
       if (value.MYSQL_PASSWORD.length < 16) {
