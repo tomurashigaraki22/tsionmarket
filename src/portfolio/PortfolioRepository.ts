@@ -2,12 +2,18 @@ import type { Pool, RowDataPacket } from 'mysql2/promise'
 import { randomUUID } from 'node:crypto'
 import { NETWORKS } from './networks.js'
 
-export type Account = { id: string; networkId: string; address: string; family: 'evm' | 'solana' }
+export type Account = {
+  id: string
+  networkId: string
+  address: string
+  family: 'evm' | 'solana'
+  ownershipStatus: 'unverified' | 'verified'
+}
 export class PortfolioRepository {
   constructor(private pool: Pool) {}
   async listAccounts(userId: string): Promise<Account[]> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT a.id,a.network_id AS networkId,a.address,n.family FROM wallet_accounts a JOIN networks n ON n.network_id=a.network_id WHERE a.user_id=? AND a.status='active' AND n.enabled=TRUE ORDER BY n.sort_order,a.created_at`,
+      `SELECT a.id,a.network_id AS networkId,a.address,n.family,a.ownership_status AS ownershipStatus FROM wallet_accounts a JOIN networks n ON n.network_id=a.network_id WHERE a.user_id=? AND a.status='active' AND n.enabled=TRUE ORDER BY n.sort_order,a.created_at`,
       [userId],
     )
     return rows as Account[]

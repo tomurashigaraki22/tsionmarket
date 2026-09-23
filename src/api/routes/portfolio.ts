@@ -1,25 +1,43 @@
 import { Router } from 'express'
-import { isAddress } from 'viem'
-import { PublicKey } from '@solana/web3.js'
 import { z } from 'zod'
+import rateLimit from 'express-rate-limit'
 import { asyncHandler } from '../../utils/asyncHandler.js'
-import { AppError } from '../../utils/errors.js'
 import { requireIdentity } from '../../auth/middleware.js'
 import type { PortfolioRepository } from '../../portfolio/PortfolioRepository.js'
 import type { BalanceService } from '../../portfolio/BalanceService.js'
-import { NETWORKS } from '../../portfolio/networks.js'
+import type { OwnershipService } from '../../portfolio/OwnershipService.js'
 
-export const walletAccountInputSchema = z
+export const ownershipChallengeInputSchema = z
   .object({
     networkId: z.string().min(1).max(64),
     address: z.string().min(1).max(128),
+  })
+  .strict()
+export const ownershipProofInputSchema = z
+  .object({
+    challengeId: z.string().uuid(),
+    networkId: z.string().min(1).max(64),
+    address: z.string().min(1).max(128),
+    signature: z.string().min(20).max(1024),
+    publicKey: z.string().min(20).max(256).optional(),
     label: z.string().max(100).optional(),
+    idempotencyKey: z.string().min(8).max(200),
   })
   .strict()
 
 export const balancesQuerySchema = z.object({ refresh: z.enum(['true', 'false']).default('false') }).strict()
-export function portfolioRouter(repo: PortfolioRepository, balances: BalanceService) {
+export function portfolioRouter(
+  repo: PortfolioRepository,
+  balances: BalanceService,
+  ownership: OwnershipService,
+) {
   const router = Router()
+  const proofLimit = rateLimit({
+    windowMs: 15 * 60_000,
+    limit: 20,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+  })
   router.get(
     '/networks',
     asyncHandler(async (_req, res) => res.json({ success: true, data: await repo.listNetworks() })),
@@ -31,24 +49,25 @@ export function portfolioRouter(repo: PortfolioRepository, balances: BalanceServ
     ),
   )
   router.post(
-    '/wallets/me/accounts',
+    '/wallets/me/accounts/challenge',
+    proofLimit,
     asyncHandler(async (req, res) => {
-      const input = walletAccountInputSchema.parse(req.body),
-        network = NETWORKS.find((n) => n.networkId === input.networkId)
-      if (!network) throw new AppError('NETWORK_UNSUPPORTED', 'Network is not supported', 400)
-      try {
-        if (network.family === 'evm' && !isAddress(input.address)) throw new Error()
-        if (network.family === 'solana') new PublicKey(input.address)
-      } catch {
-        throw new AppError('INVALID_ADDRESS', 'Address is invalid for this network', 400)
-      }
-      const id = await repo.addAccount(
+      const input = ownershipChallengeInputSchema.parse(req.body)
+      res.status(201).json({
+        success: true,
+        data: await ownership.challenge(requireIdentity(req).userId, input.networkId, input.address),
+      })
+    }),
+  )
+  router.post(
+    '/wallets/me/accounts',
+    proofLimit,
+    asyncHandler(async (req, res) => {
+      const result = await ownership.register(
         requireIdentity(req).userId,
-        input.networkId,
-        input.address,
-        input.label,
+        ownershipProofInputSchema.parse(req.body),
       )
-      res.status(201).json({ success: true, data: { id } })
+      res.status(result.existing ? 200 : 201).json({ success: true, data: result })
     }),
   )
   router.get(

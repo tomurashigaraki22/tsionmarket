@@ -22,6 +22,8 @@ import { TransactionRepository } from './transactions/TransactionRepository.js'
 import { TransactionService } from './transactions/TransactionService.js'
 import { ReconciliationWorker } from './transactions/ReconciliationWorker.js'
 import { ValuationService } from './portfolio/ValuationService.js'
+import { OwnershipRepository } from './portfolio/OwnershipRepository.js'
+import { OwnershipService } from './portfolio/OwnershipService.js'
 
 const environment = getEnvironment()
 const pool = createApplicationPool(environment)
@@ -29,6 +31,7 @@ const authRepository = new AuthRepository(pool, environment.MYSQL_ACQUIRE_TIMEOU
 const authService = new AuthService(authRepository, createEmailService(environment), environment)
 const authCleanupWorker = new AuthCleanupWorker(pool, environment.AUTH_CLEANUP_INTERVAL_SECONDS)
 const portfolioRepository = new PortfolioRepository(pool)
+const ownershipService = new OwnershipService(new OwnershipRepository(pool))
 const rpcManager = new RpcManager(environment)
 const balanceService = new BalanceService(portfolioRepository, rpcManager, environment)
 const marketRepository = new MarketRepository(pool)
@@ -53,6 +56,7 @@ const app = createApp({
   transactionService,
   transactionRepository,
   valuationService,
+  ownershipService,
 })
 const server = createServer(app)
 

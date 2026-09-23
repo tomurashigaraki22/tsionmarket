@@ -21,7 +21,7 @@ export class TradingRepository {
   constructor(private pool: Pool) {}
   async account(userId: string, id: string): Promise<OwnedAccount | null> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT a.id,a.network_id AS networkId,a.address,n.family,n.chain_id AS chainId FROM wallet_accounts a JOIN networks n ON n.network_id=a.network_id AND n.enabled=TRUE WHERE a.id=? AND a.user_id=? AND a.status='active'`,
+      `SELECT a.id,a.network_id AS networkId,a.address,n.family,n.chain_id AS chainId FROM wallet_accounts a JOIN networks n ON n.network_id=a.network_id AND n.enabled=TRUE WHERE a.id=? AND a.user_id=? AND a.status='active' AND a.ownership_status='verified'`,
       [id, userId],
     )
     return (rows[0] as OwnedAccount | undefined) ?? null

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { marketQuerySchema } from '../src/api/routes/markets.js'
-import { balancesQuerySchema, walletAccountInputSchema } from '../src/api/routes/portfolio.js'
+import {
+  balancesQuerySchema,
+  ownershipChallengeInputSchema,
+  ownershipProofInputSchema,
+} from '../src/api/routes/portfolio.js'
 import { valuationHistoryQuerySchema } from '../src/api/routes/phase12.js'
 import { intentInputSchema, quoteInputSchema } from '../src/api/routes/trading.js'
 import { transactionHistoryQuerySchema, transactionSubmissionSchema } from '../src/api/routes/transactions.js'
@@ -55,16 +59,16 @@ describe('public API request contracts', () => {
     expect(transactionHistoryQuerySchema.safeParse({ page: '2' }).success).toBe(false)
   })
 
-  it('keeps the current account registration shape explicit', () => {
-    expect(walletAccountInputSchema.parse({ networkId: 'ethereum-mainnet', address: '0xabc' })).toEqual({
+  it('requires ownership proof for account registration', () => {
+    expect(ownershipChallengeInputSchema.parse({ networkId: 'ethereum-mainnet', address: '0xabc' })).toEqual({
       networkId: 'ethereum-mainnet',
       address: '0xabc',
     })
     expect(
-      walletAccountInputSchema.safeParse({
+      ownershipProofInputSchema.safeParse({
         networkId: 'ethereum-mainnet',
         address: '0xabc',
-        ownershipProof: 'unsupported',
+        label: 'proofless',
       }).success,
     ).toBe(false)
   })

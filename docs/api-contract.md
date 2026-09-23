@@ -35,7 +35,8 @@ This document describes the API currently mounted by the application. It is the 
 | `GET`    | `/v1/auth/me`                              | Authenticated               |     200 |
 | `GET`    | `/v1/networks`                             | Authenticated               |     200 |
 | `GET`    | `/v1/wallets/me/accounts`                  | Authenticated               |     200 |
-| `POST`   | `/v1/wallets/me/accounts`                  | Authenticated; see warning  |     201 |
+| `POST`   | `/v1/wallets/me/accounts/challenge`        | Authenticated, rate-limited |     201 |
+| `POST`   | `/v1/wallets/me/accounts`                  | Authenticated, rate-limited | 200/201 |
 | `GET`    | `/v1/wallets/me/balances`                  | Authenticated               |     200 |
 | `GET`    | `/v1/markets`                              | Authenticated               |     200 |
 | `POST`   | `/v1/quotes`                               | Authenticated, rate-limited |     201 |
@@ -66,11 +67,11 @@ Email verification accepts a six-digit OTP, not a link. Login is rejected until 
 
 `GET /v1/networks` returns records containing `networkId`, `family`, `name`, `environment`, optional `chainId`/`cluster`, `nativeSymbol`, `nativeDecimals`, trusted explorer templates, and explicit `capabilities` flags for balance reads, quotes, intents, submission, and sponsorship. Only enabled networks are returned.
 
-`GET /v1/wallets/me/accounts` returns `{ id, networkId, address, family }[]`.
+`GET /v1/wallets/me/accounts` returns `{ id, networkId, address, family, ownershipStatus }[]`. Legacy accounts are `unverified` and cannot request executable quotes.
 
-`POST /v1/wallets/me/accounts` accepts `{ networkId, address, label? }` and returns `{ id }`.
+`POST /v1/wallets/me/accounts/challenge` accepts `{ networkId, address }`. It returns a five-minute, single-use challenge containing `challengeId`, the canonical human-readable `statement`, `nonce`, normalized address, authenticated user binding, issue/expiry timestamps, and `signatureScheme`.
 
-> Security boundary: account creation validates address format but does not yet verify ownership. The web client must not expose this mutation until the backend adds a nonce/challenge and cryptographic ownership proof. Reads remain supported.
+`POST /v1/wallets/me/accounts` accepts `{ challengeId, networkId, address, signature, publicKey?, label?, idempotencyKey }`. The signature must be EIP-191 for EVM or Ed25519 for Solana. The challenge is user/address/network bound, attempts are limited, address ownership is globally exclusive per network, and a matching idempotent retry returns the existing account.
 
 `GET /v1/wallets/me/balances?refresh=true|false` returns `{ asOf, stale, accounts, errors }`. Each account includes `{ accountId, networkId, address, assets, state, error? }`; each asset includes `{ assetId, symbol, decimals, raw, formatted }`.
 

@@ -26,6 +26,7 @@ import { transactionsRouter } from './api/routes/transactions.js'
 import { metricsHandler, metricsMiddleware } from './observability/metrics.js'
 import type { ValuationService } from './portfolio/ValuationService.js'
 import { phase12Router } from './api/routes/phase12.js'
+import type { OwnershipService } from './portfolio/OwnershipService.js'
 
 export type AppDependencies = {
   environment: Environment
@@ -39,6 +40,7 @@ export type AppDependencies = {
   transactionService?: TransactionService
   transactionRepository?: TransactionRepository
   valuationService?: ValuationService
+  ownershipService?: OwnershipService
 }
 
 export function createApp({
@@ -53,6 +55,7 @@ export function createApp({
   transactionService,
   transactionRepository,
   valuationService,
+  ownershipService,
 }: AppDependencies): Express {
   const app = express()
   app.disable('x-powered-by')
@@ -99,8 +102,8 @@ export function createApp({
     // Future /v1 routers inherit a fail-closed authenticated boundary unless
     // they are deliberately mounted above this line as public routes.
     app.use('/v1', authenticationMiddleware(authService))
-    if (portfolioRepository && balanceService)
-      app.use('/v1', portfolioRouter(portfolioRepository, balanceService))
+    if (portfolioRepository && balanceService && ownershipService)
+      app.use('/v1', portfolioRouter(portfolioRepository, balanceService, ownershipService))
     if (marketRepository)
       app.use('/v1', marketsRouter(marketRepository, environment.MARKET_STALE_AFTER_SECONDS))
     if (quoteService && intentService && transactionRepository)
