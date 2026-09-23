@@ -73,7 +73,7 @@ Email verification accepts a six-digit OTP, not a link. Login is rejected until 
 
 `POST /v1/wallets/me/accounts` accepts `{ challengeId, networkId, address, signature, publicKey?, label?, idempotencyKey }`. The signature must be EIP-191 for EVM or Ed25519 for Solana. The challenge is user/address/network bound, attempts are limited, address ownership is globally exclusive per network, and a matching idempotent retry returns the existing account.
 
-`GET /v1/wallets/me/balances?refresh=true|false` returns `{ asOf, stale, accounts, errors }`. Each account includes `{ accountId, networkId, address, assets, state, error? }`; each asset includes `{ assetId, symbol, decimals, raw, formatted }`.
+`GET /v1/wallets/me/balances?refresh=true|false` aggregates verified accounts only and returns `{ asOf, stale, accounts, errors }`. Each account includes `{ accountId, networkId, address, assets, state, observedAt, providerStatus, error? }`; each asset includes `{ assetId, symbol, decimals, raw, formatted, supported }`. Provider failures and timeouts are isolated per account, so successful balances remain available in a partial response.
 
 ## Markets and execution
 
@@ -93,9 +93,9 @@ Email verification accepts a six-digit OTP, not a link. Login is rejected until 
 
 ## Valuation and capabilities
 
-`GET /v1/portfolio/valuation` returns decimal USD totals, nullable position price/value fields, timestamps, stale state, and unavailable P&L until a supported basis exists.
+`GET /v1/portfolio/valuation` returns decimal USD totals with `currency: "USD"`, `decimalPrecision: 8`, nullable position price/value fields, price and observation timestamps, stale state, and `status: "unavailable" | "partial" | "zero" | "complete"`. P&L remains unavailable until a supported cost basis exists.
 
-`GET /v1/portfolio/valuation/history?limit=30` accepts 1–100 and returns chronological `{ asOf, totalValueUsd, pricedValueUsd, unpricedAssetCount }[]` points.
+`GET /v1/portfolio/valuation/history?limit=30` accepts 1–100 and returns user-scoped `{ asOf, totalValueUsd, pricedValueUsd, unpricedAssetCount }[]` points in deterministic newest-first order.
 
 `GET /v1/capabilities` returns chain adapters, sponsorship availability, advanced-order availability/reason, transaction-stream transport/path, and live quote/intent pause controls. UI availability must follow these flags.
 

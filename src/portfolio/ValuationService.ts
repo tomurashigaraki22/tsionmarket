@@ -60,12 +60,23 @@ export class ValuationService {
     const total = values.reduce((sum, value) => sum.add(value), new Decimal(0)).toFixed(8),
       priceAsOf = prices.length ? new Date(Math.min(...prices.map((price) => price.asOf.getTime()))) : null,
       result = {
+        currency: 'USD' as const,
+        decimalPrecision: 8,
         asOf: new Date().toISOString(),
         priceAsOf: priceAsOf?.toISOString() ?? null,
         totalValueUsd: total,
         pricedValueUsd: total,
         unpricedAssetCount: unpriced,
         stale: snapshot.stale,
+        status:
+          snapshot.accounts.length > 0 &&
+          snapshot.accounts.every((account) => account.state === 'unavailable')
+            ? ('unavailable' as const)
+            : snapshot.errors > 0 || unpriced > 0
+              ? ('partial' as const)
+              : values.length === 0
+                ? ('zero' as const)
+                : ('complete' as const),
         positions,
         pnl: {
           available: false,

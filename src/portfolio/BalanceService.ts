@@ -8,13 +8,22 @@ import type { Account, PortfolioRepository } from './PortfolioRepository.js'
 import type { RpcManager } from './RpcManager.js'
 
 const erc20 = parseAbi(['function balanceOf(address owner) view returns (uint256)'])
-type AssetBalance = { assetId: string; symbol: string; decimals: number; raw: string; formatted: string }
+type AssetBalance = {
+  assetId: string
+  symbol: string
+  decimals: number
+  raw: string
+  formatted: string
+  supported: true
+}
 type AccountResult = {
   accountId: string
   networkId: string
   address: string
   assets: AssetBalance[]
   state: 'ready' | 'unavailable'
+  observedAt: string
+  providerStatus: 'fresh' | 'unavailable'
   error?: { code: string; message: string }
 }
 export type PortfolioSnapshot = { asOf: string; stale: boolean; accounts: AccountResult[]; errors: number }
@@ -46,7 +55,9 @@ export class BalanceService {
     return job
   }
   private async load(userId: string): Promise<PortfolioSnapshot> {
-    const accounts = await this.repo.listAccounts(userId),
+    const accounts = (await this.repo.listAccounts(userId)).filter(
+        (account) => account.ownershipStatus === 'verified',
+      ),
       results: AccountResult[] = []
     for (let i = 0; i < accounts.length; i += this.env.BALANCE_MAX_CONCURRENCY) {
       results.push(
@@ -63,6 +74,8 @@ export class BalanceService {
                       address: a.address,
                       assets: [],
                       state: 'unavailable',
+                      observedAt: new Date().toISOString(),
+                      providerStatus: 'unavailable',
                       error: { code: 'BALANCE_UNAVAILABLE', message: 'Balance request timed out' },
                     }),
                   this.env.BALANCE_AGGREGATE_TIMEOUT_MS,
@@ -89,6 +102,8 @@ export class BalanceService {
         address: account.address,
         assets: [],
         state: 'unavailable',
+        observedAt: new Date().toISOString(),
+        providerStatus: 'unavailable',
         error: { code: 'NETWORK_UNSUPPORTED', message: 'Network is not supported' },
       }
     try {
@@ -103,6 +118,7 @@ export class BalanceService {
             decimals: network.nativeDecimals,
             raw: native.toString(),
             formatted: formatUnits(native, network.nativeDecimals),
+            supported: true,
           },
         ]
         for (const token of BALANCE_TOKENS[network.networkId] ?? []) {
@@ -118,6 +134,7 @@ export class BalanceService {
             decimals: token.decimals,
             raw: raw.toString(),
             formatted: formatUnits(raw, token.decimals),
+            supported: true,
           })
         }
         return {
@@ -126,6 +143,8 @@ export class BalanceService {
           address: account.address,
           assets,
           state: 'ready',
+          observedAt: new Date().toISOString(),
+          providerStatus: 'fresh',
         }
       }
       const owner = new PublicKey(account.address),
@@ -143,6 +162,7 @@ export class BalanceService {
           decimals: 9,
           raw: String(lamports),
           formatted: formatUnits(BigInt(lamports), 9),
+          supported: true,
         })
         const allow = new Map((BALANCE_TOKENS[network.networkId] ?? []).map((t) => [t.address, t]))
         for (const row of tokens.value) {
@@ -155,6 +175,7 @@ export class BalanceService {
               decimals: meta.decimals,
               raw: info.tokenAmount.amount,
               formatted: formatUnits(BigInt(info.tokenAmount.amount), meta.decimals),
+              supported: true,
             })
         }
       })
@@ -164,6 +185,8 @@ export class BalanceService {
         address: account.address,
         assets,
         state: 'ready',
+        observedAt: new Date().toISOString(),
+        providerStatus: 'fresh',
       }
     } catch (error) {
       return {
@@ -172,6 +195,8 @@ export class BalanceService {
         address: account.address,
         assets: [],
         state: 'unavailable',
+        observedAt: new Date().toISOString(),
+        providerStatus: 'unavailable',
         error: {
           code: error instanceof AppError ? error.code : 'BALANCE_UNAVAILABLE',
           message: error instanceof AppError ? error.message : 'Balance temporarily unavailable',
