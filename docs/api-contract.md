@@ -1,118 +1,116 @@
-# API Contract
+# TsionMarket HTTP API contract
+
+This document describes the API currently mounted by the application. It is the contract used by the web client; planned routes must not appear here until implemented.
 
 ## Conventions
 
-- Base path for product APIs: `/v1`.
-- Content type: `application/json`.
-- Amounts: unsigned base-unit decimal strings; never JSON floating-point numbers.
-- Timestamps: UTC ISO 8601 in the API and UTC `TIMESTAMP(6)` in MySQL.
-- IDs: canonical UUID strings externally.
-- Pagination: opaque cursor plus bounded `limit`.
-- Caller request IDs are accepted only in a safe character/length format; otherwise the server generates one.
-
-Success:
-
-```json
-{ "success": true, "data": {} }
-```
-
-Failure:
-
-```json
-{
-  "success": false,
-  "error": { "code": "VALIDATION_ERROR", "message": "Request validation failed" },
-  "requestId": "c0a8012e-..."
-}
-```
-
-## Authentication classes
-
-| Class         | Meaning                                                                     |
-| ------------- | --------------------------------------------------------------------------- |
-| Public        | No user identity; strict rate limiting still applies                        |
-| Authenticated | Valid access token plus active user/session                                 |
-| Wallet-owned  | Authenticated plus account ownership verified by SQL join                   |
-| Internal      | Separate service credential/workload identity; never substitutes for a user |
-
-Phase 1 implements only public health/readiness endpoints. Phase 2 adds authentication endpoints. Subsequent endpoints remain contract reservations until their phase is implemented.
+- Product base path: `/v1`.
+- Success: `{ "success": true, "data": ... }`.
+- Failure: `{ "success": false, "error": { "code", "message", "details"? }, "requestId" }`.
+- Token and currency amounts are unsigned base-unit decimal strings, never JSON floating-point numbers.
+- Timestamps are UTC ISO-8601 strings; exposed authenticated-resource IDs are UUIDs.
+- Pagination uses an opaque `cursor` and bounded `limit`.
+- Bodies and documented query strings are strict; unknown fields are validation errors.
+- Authenticated routes require `Authorization: Bearer <accessToken>` unless stated otherwise.
+- Refresh requires the HttpOnly refresh cookie, matching CSRF cookie/header, and an allowed `Origin`.
 
 ## Endpoint catalogue
 
-| Method and path                                  | Class         | Owner        | Phase | Key errors                                                                     |
-| ------------------------------------------------ | ------------- | ------------ | ----: | ------------------------------------------------------------------------------ |
-| `GET /health`                                    | Public        | Platform     |     1 | none                                                                           |
-| `GET /ready`                                     | Public        | Platform     |     1 | `SERVICE_NOT_READY`                                                            |
-| `POST /v1/auth/register`                         | Public        | Auth         |     2 | `VALIDATION_ERROR`, `RATE_LIMITED`                                             |
-| `POST /v1/auth/verify-email`                     | Public        | Auth         |     2 | `CHALLENGE_INVALID`, `CHALLENGE_EXPIRED`                                       |
-| `POST /v1/auth/login`                            | Public        | Auth         |     2 | `INVALID_CREDENTIALS`, `ACCOUNT_UNAVAILABLE`                                   |
-| `POST /v1/auth/refresh`                          | Public/cookie | Auth         |     2 | `SESSION_INVALID`, `TOKEN_REUSE_DETECTED`                                      |
-| `POST /v1/auth/logout`                           | Authenticated | Auth         |     2 | `AUTH_REQUIRED`                                                                |
-| `GET /v1/auth/me`                                | Authenticated | Auth         |     2 | `AUTH_REQUIRED`                                                                |
-| `POST /v1/wallets/me/accounts/challenge`         | Authenticated | Wallet       |     3 | `AUTH_REQUIRED`, `RATE_LIMITED`                                                |
-| `POST /v1/wallets/me/accounts`                   | Authenticated | Wallet       |     3 | `OWNERSHIP_PROOF_INVALID`, `CHALLENGE_EXPIRED`                                 |
-| `GET /v1/wallets/me`                             | Authenticated | Wallet       |     3 | `AUTH_REQUIRED`                                                                |
-| `GET /v1/wallets/me/balances`                    | Authenticated | Wallet       |     4 | `BALANCE_UNAVAILABLE`                                                          |
-| `GET /v1/markets`                                | Authenticated | Markets      |     5 | `VALIDATION_ERROR`                                                             |
-| `POST /v1/quotes`                                | Wallet-owned  | Markets      |     6 | `MARKET_UNAVAILABLE`, `INSUFFICIENT_ASSET_BALANCE`, `INSUFFICIENT_FEE_BALANCE` |
-| `POST /v1/quotes/:quoteId/intents`               | Wallet-owned  | Transactions |     7 | `QUOTE_EXPIRED`, `QUOTE_TAMPERED`                                              |
-| `POST /v1/transactions/intents/:intentId/submit` | Wallet-owned  | Transactions |     8 | `SIGNED_PAYLOAD_MISMATCH`, `INTENT_EXPIRED`                                    |
-| `GET /v1/transactions`                           | Authenticated | Transactions |     8 | `AUTH_REQUIRED`                                                                |
+| Method   | Path                                       | Access                      | Success |
+| -------- | ------------------------------------------ | --------------------------- | ------: |
+| `GET`    | `/health`                                  | Public                      |     200 |
+| `GET`    | `/ready`                                   | Public                      | 200/503 |
+| `POST`   | `/v1/auth/register`                        | Public, rate-limited        |     202 |
+| `POST`   | `/v1/auth/verify-email`                    | Public, rate-limited        |     200 |
+| `POST`   | `/v1/auth/resend-verification`             | Public, rate-limited        |     202 |
+| `POST`   | `/v1/auth/login`                           | Public, rate-limited        |     200 |
+| `POST`   | `/v1/auth/refresh`                         | Refresh cookie + CSRF       |     200 |
+| `POST`   | `/v1/auth/logout`                          | Authenticated               |     200 |
+| `POST`   | `/v1/auth/logout-all`                      | Authenticated               |     200 |
+| `GET`    | `/v1/auth/sessions`                        | Authenticated               |     200 |
+| `DELETE` | `/v1/auth/sessions/:sessionId`             | Authenticated               |     200 |
+| `POST`   | `/v1/auth/forgot-password`                 | Public, rate-limited        |     202 |
+| `POST`   | `/v1/auth/reset-password`                  | Public, rate-limited        |     200 |
+| `POST`   | `/v1/auth/change-password`                 | Authenticated, rate-limited |     200 |
+| `GET`    | `/v1/auth/me`                              | Authenticated               |     200 |
+| `GET`    | `/v1/networks`                             | Authenticated               |     200 |
+| `GET`    | `/v1/wallets/me/accounts`                  | Authenticated               |     200 |
+| `POST`   | `/v1/wallets/me/accounts`                  | Authenticated; see warning  |     201 |
+| `GET`    | `/v1/wallets/me/balances`                  | Authenticated               |     200 |
+| `GET`    | `/v1/markets`                              | Authenticated               |     200 |
+| `POST`   | `/v1/quotes`                               | Authenticated, rate-limited |     201 |
+| `POST`   | `/v1/transaction-intents`                  | Authenticated, rate-limited | 200/201 |
+| `POST`   | `/v1/transaction-intents/:intentId/submit` | Authenticated, rate-limited | 200/202 |
+| `GET`    | `/v1/transactions`                         | Authenticated               |     200 |
+| `GET`    | `/v1/transactions/:transactionId`          | Authenticated               |     200 |
+| `GET`    | `/v1/portfolio/valuation`                  | Authenticated               |     200 |
+| `GET`    | `/v1/portfolio/valuation/history`          | Authenticated               |     200 |
+| `GET`    | `/v1/capabilities`                         | Authenticated               |     200 |
+| `GET`    | `/v1/transactions/stream`                  | Authenticated               | 200 SSE |
 
-## Phase 1 endpoint schemas
-
-### `GET /health`
-
-Always reports process liveness and does not query MySQL. HTTP 200 when the HTTP process is serving.
-
-### `GET /ready`
-
-Queries MySQL and verifies that every local migration exists in `schema_migrations` with the expected checksum. HTTP 200 only when both checks pass; otherwise HTTP 503. It does not expose credentials, SQL, hostnames, or driver errors.
-
-## Stable foundation error catalogue
-
-| Code                   | HTTP | Meaning                                                    |
-| ---------------------- | ---: | ---------------------------------------------------------- |
-| `VALIDATION_ERROR`     |  400 | Input failed schema validation                             |
-| `INVALID_QUERY_OPTION` |  400 | A non-allowlisted query option was supplied                |
-| `CORS_ORIGIN_DENIED`   |  403 | Browser origin is not configured                           |
-| `NOT_FOUND`            |  404 | Route/resource is unavailable or hidden by ownership rules |
-| `RATE_LIMITED`         |  429 | Request limit exceeded                                     |
-| `SERVICE_NOT_READY`    |  503 | Dependency/schema readiness failed                         |
-| `INTERNAL_ERROR`       |  500 | Unexpected server failure; details remain internal         |
-
-## Initial sequence diagrams
-
-### Frontend wallet registration (Phase 3)
+## Authentication
 
 ```text
-Frontend               API                 MySQL
-   | create keys locally |                    |
-   | encrypt/store locally                    |
-   |-- request challenge -->|                 |
-   |<-- nonce + expiry ------|-- insert hash ->|
-   | sign challenge locally |                 |
-   |-- public data + proof ->|                 |
-   |                        |-- lock/consume -->|
-   |                        |-- verify proof   |
-   |                        |-- insert account>|
-   |<-- public account ------|                 |
+register              { email, password, termsVersion }
+verify-email          { token: sixDigitCode }
+resend-verification   { email }
+login                 { email, password }
+forgot-password       { email }
+reset-password        { token, newPassword }
+change-password       { currentPassword, newPassword }
 ```
 
-### Quote to submission (Phases 6–8)
+Email verification accepts a six-digit OTP, not a link. Login is rejected until verification. Login and refresh return `{ accessToken, tokenType: "Bearer", expiresIn, sessionId }`. `/auth/me` returns `{ user: { id, email }, sessionId }`; clients must not synthesize a guest user.
 
-```text
-Client -> API: quote request
-API -> provider/RPC: route + balances + fee estimate
-API -> MySQL: persist expiring quote
-API -> Client: validated quote
-Client -> API: create intent
-API -> RPC: build/validate/simulate
-API -> MySQL: persist exact unsigned intent
-API -> Client: review + signing payload
-Client: sign locally
-Client -> API: signed payload
-API: verify exact intent binding
-API -> RPC: broadcast
-API -> MySQL: record/reconcile status
-```
+## Networks and portfolio
+
+`GET /v1/networks` returns records containing `networkId`, `family`, `name`, `environment`, optional `chainId`/`cluster`, `nativeSymbol`, `nativeDecimals`, and `capabilities`.
+
+`GET /v1/wallets/me/accounts` returns `{ id, networkId, address, family }[]`.
+
+`POST /v1/wallets/me/accounts` accepts `{ networkId, address, label? }` and returns `{ id }`.
+
+> Security boundary: account creation validates address format but does not yet verify ownership. The web client must not expose this mutation until the backend adds a nonce/challenge and cryptographic ownership proof. Reads remain supported.
+
+`GET /v1/wallets/me/balances?refresh=true|false` returns `{ asOf, stale, accounts, errors }`. Each account includes `{ accountId, networkId, address, assets, state, error? }`; each asset includes `{ assetId, symbol, decimals, raw, formatted }`.
+
+## Markets and execution
+
+`GET /v1/markets` accepts `networkId?`, `venue?: "0x" | "jupiter"`, `search?`, `limit?` (1–100, default 50), and `cursor?`. It returns `{ items, nextCursor, stale, lastSuccessfulSync }`. Price/liquidity/volume fields are decimal strings or `null`.
+
+`POST /v1/quotes` accepts `{ marketId, side: "buy" | "sell", amountRaw, sourceAccountId, slippageBps? }`. `slippageBps` defaults to 50 and is bounded to 1–5000. `amountRaw` must match `^[1-9]\\d*$`.
+
+`POST /v1/transaction-intents` accepts `{ quoteId: uuid, idempotencyKey }`. An idempotent replay returns 200; creation returns 201. Its data is `{ intent, existing, requiresApproval? }`.
+
+`POST /v1/transaction-intents/:intentId/submit` accepts `{ signedTransaction }`. An idempotent replay returns 200; accepted submission returns 202. Execution can return `EXECUTION_PAUSED` when operational controls pause quotes or intents.
+
+## Transactions
+
+`GET /v1/transactions` accepts `limit?` (1–100, default 50) and opaque `cursor?`, returning `{ items, nextCursor }`. `GET /v1/transactions/:transactionId` only returns an owned record.
+
+`GET /v1/transactions/stream` emits SSE events: `ready` (`{ "connected": true }`), `transaction` (transaction record), and `unavailable` (`{ "retry": true }`), with five-second heartbeats. The connection closes after five minutes; clients reconnect with backoff.
+
+## Valuation and capabilities
+
+`GET /v1/portfolio/valuation` returns decimal USD totals, nullable position price/value fields, timestamps, stale state, and unavailable P&L until a supported basis exists.
+
+`GET /v1/portfolio/valuation/history?limit=30` accepts 1–100 and returns chronological `{ asOf, totalValueUsd, pricedValueUsd, unpricedAssetCount }[]` points.
+
+`GET /v1/capabilities` returns chain adapters, sponsorship availability, advanced-order availability/reason, and transaction-stream transport/path. UI availability must follow these flags.
+
+## Stable error behavior
+
+| Code                     | HTTP | Meaning                                       |
+| ------------------------ | ---: | --------------------------------------------- |
+| `VALIDATION_ERROR`       |  400 | Body, parameter, or query failed validation   |
+| `INVALID_CREDENTIALS`    |  401 | Login credentials are invalid                 |
+| `AUTH_REQUIRED`          |  401 | Access token or active session is missing     |
+| `CSRF_VALIDATION_FAILED` |  403 | Refresh origin/cookie/header check failed     |
+| `NOT_FOUND`              |  404 | Route or resource is unavailable              |
+| `TRANSACTION_NOT_FOUND`  |  404 | Owned transaction was not found               |
+| `RATE_LIMITED`           |  429 | Request limit exceeded                        |
+| `EXECUTION_PAUSED`       |  503 | Operational control paused execution          |
+| `SERVICE_NOT_READY`      |  503 | Dependency or schema readiness failed         |
+| `INTERNAL_ERROR`         |  500 | Unexpected error; internals are not disclosed |
+
+The failure `requestId` is safe to display in support UI and logs.

@@ -7,11 +7,13 @@ import type { TransactionService } from '../../transactions/TransactionService.j
 import { asyncHandler } from '../../utils/asyncHandler.js'
 import { AppError } from '../../utils/errors.js'
 
-const submission = z.object({ signedTransaction: z.string().min(20) }).strict(),
-  history = z.object({
+export const transactionSubmissionSchema = z.object({ signedTransaction: z.string().min(20) }).strict()
+export const transactionHistoryQuerySchema = z
+  .object({
     limit: z.coerce.number().int().min(1).max(100).default(50),
     cursor: z.string().max(1000).optional(),
   })
+  .strict()
 export function transactionsRouter(service: TransactionService, repo: TransactionRepository) {
   const router = Router(),
     submitLimit = rateLimit({ windowMs: 60_000, limit: 20, standardHeaders: 'draft-7', legacyHeaders: false })
@@ -19,7 +21,7 @@ export function transactionsRouter(service: TransactionService, repo: Transactio
     '/transaction-intents/:intentId/submit',
     submitLimit,
     asyncHandler(async (req, res) => {
-      const body = submission.parse(req.body),
+      const body = transactionSubmissionSchema.parse(req.body),
         result = await service.submit(
           requireIdentity(req).userId,
           z.string().uuid().parse(req.params.intentId),
@@ -31,16 +33,13 @@ export function transactionsRouter(service: TransactionService, repo: Transactio
   )
   router.get(
     '/transactions',
-    asyncHandler(async (req, res) =>
+    asyncHandler(async (req, res) => {
+      const query = transactionHistoryQuerySchema.parse(req.query)
       res.json({
         success: true,
-        data: await repo.history(
-          requireIdentity(req).userId,
-          history.parse(req.query).limit,
-          history.parse(req.query).cursor,
-        ),
-      }),
-    ),
+        data: await repo.history(requireIdentity(req).userId, query.limit, query.cursor),
+      })
+    }),
   )
   router.get(
     '/transactions/:transactionId',

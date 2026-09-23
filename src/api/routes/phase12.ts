@@ -7,6 +7,10 @@ import type { ValuationService } from '../../portfolio/ValuationService.js'
 import type { TransactionRepository } from '../../transactions/TransactionRepository.js'
 import { asyncHandler } from '../../utils/asyncHandler.js'
 
+export const valuationHistoryQuerySchema = z
+  .object({ limit: z.coerce.number().int().min(1).max(100).default(30) })
+  .strict()
+
 export function phase12Router(valuations: ValuationService, transactions: TransactionRepository) {
   const router = Router()
   router.get(
@@ -22,7 +26,7 @@ export function phase12Router(valuations: ValuationService, transactions: Transa
         success: true,
         data: await valuations.history(
           requireIdentity(req).userId,
-          z.coerce.number().int().min(1).max(100).default(30).parse(req.query.limit),
+          valuationHistoryQuerySchema.parse(req.query).limit,
         ),
       }),
     ),

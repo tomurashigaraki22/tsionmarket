@@ -9,11 +9,15 @@ import type { PortfolioRepository } from '../../portfolio/PortfolioRepository.js
 import type { BalanceService } from '../../portfolio/BalanceService.js'
 import { NETWORKS } from '../../portfolio/networks.js'
 
-const account = z.object({
-  networkId: z.string().max(64),
-  address: z.string().max(128),
-  label: z.string().max(100).optional(),
-})
+export const walletAccountInputSchema = z
+  .object({
+    networkId: z.string().min(1).max(64),
+    address: z.string().min(1).max(128),
+    label: z.string().max(100).optional(),
+  })
+  .strict()
+
+export const balancesQuerySchema = z.object({ refresh: z.enum(['true', 'false']).default('false') }).strict()
 export function portfolioRouter(repo: PortfolioRepository, balances: BalanceService) {
   const router = Router()
   router.get(
@@ -29,7 +33,7 @@ export function portfolioRouter(repo: PortfolioRepository, balances: BalanceServ
   router.post(
     '/wallets/me/accounts',
     asyncHandler(async (req, res) => {
-      const input = account.parse(req.body),
+      const input = walletAccountInputSchema.parse(req.body),
         network = NETWORKS.find((n) => n.networkId === input.networkId)
       if (!network) throw new AppError('NETWORK_UNSUPPORTED', 'Network is not supported', 400)
       try {
@@ -52,7 +56,10 @@ export function portfolioRouter(repo: PortfolioRepository, balances: BalanceServ
     asyncHandler(async (req, res) =>
       res.json({
         success: true,
-        data: await balances.portfolio(requireIdentity(req).userId, req.query.refresh === 'true'),
+        data: await balances.portfolio(
+          requireIdentity(req).userId,
+          balancesQuerySchema.parse(req.query).refresh === 'true',
+        ),
       }),
     ),
   )
