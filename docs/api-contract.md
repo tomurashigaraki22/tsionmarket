@@ -77,7 +77,7 @@ Email verification accepts a six-digit OTP, not a link. Login is rejected until 
 
 ## Markets and execution
 
-`GET /v1/markets` accepts `networkId?`, `venue?: "0x" | "jupiter"`, `search?`, `limit?` (1–100, default 50), and `cursor?`. It returns `{ items, nextCursor, stale, lastSuccessfulSync }`. Price/liquidity/volume fields are decimal strings or `null`.
+`GET /v1/markets` accepts `networkId?`, `venue?: "0x" | "jupiter"`, `search?`, `limit?` (1–100, default 50), and `cursor?`. It returns `{ items, nextCursor, stale, lastSuccessfulSync }`. Every normalized item includes its exact `marketId`, venue, network, base/quote token identifiers and symbols, base/quote decimals, `executable`, `status`, display metadata, and `observedAt`; price/liquidity/volume fields are decimal strings or `null`. Raw provider payloads are never exposed.
 
 `POST /v1/quotes` accepts `{ marketId, side: "buy" | "sell", amountRaw, sourceAccountId, slippageBps? }`. `slippageBps` defaults to 50 and is bounded to 1–5000. `amountRaw` must match `^[1-9]\\d*$`.
 

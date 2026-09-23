@@ -97,6 +97,10 @@ export function createApp({
 
   app.use(healthRouter(readinessCheck))
   app.get('/metrics', metricsHandler(environment))
+  // The normalized, read-only catalogue powers the public landing page. All
+  // execution endpoints remain behind the authenticated boundary below.
+  if (marketRepository)
+    app.use('/v1', marketsRouter(marketRepository, environment.MARKET_STALE_AFTER_SECONDS))
   if (authService) {
     app.use('/v1/auth', authRouter(authService, environment))
     // Future /v1 routers inherit a fail-closed authenticated boundary unless
@@ -104,8 +108,6 @@ export function createApp({
     app.use('/v1', authenticationMiddleware(authService))
     if (portfolioRepository && balanceService && ownershipService)
       app.use('/v1', portfolioRouter(portfolioRepository, balanceService, ownershipService))
-    if (marketRepository)
-      app.use('/v1', marketsRouter(marketRepository, environment.MARKET_STALE_AFTER_SECONDS))
     if (quoteService && intentService && transactionRepository)
       app.use('/v1', tradingRouter(quoteService, intentService, transactionRepository))
     if (transactionService && transactionRepository)

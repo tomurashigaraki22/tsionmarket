@@ -111,7 +111,7 @@ export class MarketRepository {
     }
     params.push(q.limit + 1)
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT m.market_id AS marketId,m.venue,m.network_id AS networkId,m.base_symbol AS baseSymbol,m.quote_symbol AS quoteSymbol,m.base_token AS baseToken,m.quote_token AS quoteToken,m.decimals,CAST(m.price_usd AS CHAR) AS priceUsd,CAST(m.liquidity_usd AS CHAR) AS liquidityUsd,CAST(m.volume_24h_usd AS CHAR) AS volume24hUsd,m.icon_url AS iconUrl,m.chart_symbol AS chartSymbol,m.synced_at AS syncedAt FROM spot_markets m JOIN networks n ON n.network_id=m.network_id AND n.enabled=TRUE WHERE ${where.join(' AND ')} ORDER BY COALESCE(m.liquidity_usd,0) DESC,m.market_id ASC LIMIT ?`,
+      `SELECT m.market_id AS marketId,m.venue,m.network_id AS networkId,m.base_symbol AS baseSymbol,m.quote_symbol AS quoteSymbol,m.base_token AS baseToken,m.quote_token AS quoteToken,m.decimals,m.decimals AS baseDecimals,6 AS quoteDecimals,TRUE AS executable,'active' AS status,CAST(m.price_usd AS CHAR) AS priceUsd,CAST(m.liquidity_usd AS CHAR) AS liquidityUsd,CAST(m.volume_24h_usd AS CHAR) AS volume24hUsd,m.icon_url AS iconUrl,m.chart_symbol AS chartSymbol,m.synced_at AS syncedAt,m.synced_at AS observedAt FROM spot_markets m JOIN networks n ON n.network_id=m.network_id AND n.enabled=TRUE WHERE ${where.join(' AND ')} ORDER BY COALESCE(m.liquidity_usd,0) DESC,m.market_id ASC LIMIT ?`,
       params,
     )
     const hasMore = rows.length > q.limit,

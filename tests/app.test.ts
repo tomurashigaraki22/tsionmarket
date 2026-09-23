@@ -73,4 +73,26 @@ describe('HTTP foundation', () => {
     expect(response.body).toMatchObject({ success: false, error: { code: 'NOT_FOUND' } })
     expect(response.body.requestId).toBe(response.headers['x-request-id'])
   })
+
+  it('serves the read-only market catalogue without authentication', async () => {
+    const marketRepository = {
+      browse: async () => ({
+        items: [{ marketId: '0x:ethereum-mainnet:weth:usdc' }],
+        nextCursor: null,
+        stale: false,
+        lastSuccessfulSync: new Date().toISOString(),
+      }),
+    }
+    const app = createApp({
+      environment,
+      readinessCheck: async () => ({
+        ready: true,
+        checks: { mysql: 'ready', migrations: 'current' },
+      }),
+      marketRepository: marketRepository as never,
+    })
+    const response = await request(app).get('/v1/markets')
+    expect(response.status).toBe(200)
+    expect(response.body.data.items[0].marketId).toBe('0x:ethereum-mainnet:weth:usdc')
+  })
 })
