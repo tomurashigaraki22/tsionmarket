@@ -83,6 +83,8 @@ Email verification accepts a six-digit OTP, not a link. Login is rejected until 
 
 `POST /v1/transaction-intents` accepts `{ quoteId: uuid, idempotencyKey }`. An idempotent replay returns 200; creation returns 201. Its data is `{ intent, existing, requiresApproval? }`.
 
+The returned intent is bound to `accountId`, `quoteId`, `networkId`, `chainFamily`, and expiry, and contains `payloadVersion: 1`, the canonical `unsignedTransaction`, an immutable `normalizedSummary`, and `payloadHash` (SHA-256 of canonical JSON). Reusing an idempotency key with a different quote is rejected with `IDEMPOTENCY_KEY_REUSED`.
+
 `POST /v1/transaction-intents/:intentId/submit` accepts `{ signedTransaction }`. An idempotent replay returns 200; accepted submission returns 202. Execution can return `EXECUTION_PAUSED` when operational controls pause quotes or intents.
 
 ## Transactions

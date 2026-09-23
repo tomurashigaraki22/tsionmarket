@@ -57,6 +57,8 @@ export class QuoteService {
     })
     return {
       quoteId: stored.id,
+      marketId: input.marketId,
+      sourceAccountId: input.sourceAccountId,
       provider: 'lifi',
       integrator: this.env.LIFI_INTEGRATOR,
       sourceNetworkId: source.networkId,
@@ -71,6 +73,10 @@ export class QuoteService {
       priceImpactBps: quote.priceImpactBps,
       estimatedFeeRaw: quote.estimatedFeeRaw,
       tool: quote.tool,
+      transactionTarget:
+        typeof (quote.snapshot.transactionRequest as Record<string, unknown>)?.to === 'string'
+          ? String((quote.snapshot.transactionRequest as Record<string, unknown>).to)
+          : null,
       executable: true,
       expiresAt: stored.expiresAt.toISOString(),
     }

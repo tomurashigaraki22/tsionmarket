@@ -103,12 +103,27 @@ export class TradingRepository {
       consumedAt: row.consumedAt ? new Date(row.consumedAt) : null,
     }
   }
-  async existingIntent(userId: string, key: string) {
+  async existingIntent(
+    userId: string,
+    key: string,
+  ): Promise<({ quoteId: string } & Record<string, unknown>) | null> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT id,status,intent_type AS intentType,chain_family AS chainFamily,network_id AS networkId,unsigned_transaction AS unsignedTransaction,normalized_summary AS normalizedSummary,expires_at AS expiresAt FROM transaction_intents WHERE user_id=? AND idempotency_key=?`,
+      `SELECT id,account_id AS accountId,quote_id AS quoteId,status,intent_type AS intentType,chain_family AS chainFamily,network_id AS networkId,unsigned_transaction AS unsignedTransaction,normalized_summary AS normalizedSummary,payload_hash AS payloadHash,expires_at AS expiresAt FROM transaction_intents WHERE user_id=? AND idempotency_key=?`,
       [userId, key],
     )
-    return rows[0] ?? null
+    const row = rows[0]
+    if (!row) return null
+    return {
+      ...row,
+      unsignedTransaction:
+        typeof row.unsignedTransaction === 'string'
+          ? JSON.parse(row.unsignedTransaction)
+          : row.unsignedTransaction,
+      normalizedSummary:
+        typeof row.normalizedSummary === 'string' ? JSON.parse(row.normalizedSummary) : row.normalizedSummary,
+      payloadVersion: 1,
+      expiresAt: new Date(row.expiresAt),
+    } as unknown as { quoteId: string } & Record<string, unknown>
   }
   async createIntent(input: {
     userId: string
@@ -150,12 +165,16 @@ export class TradingRepository {
     )
     return {
       id,
+      accountId: input.accountId,
+      quoteId: input.quoteId,
       status: input.status ?? 'awaiting_signature',
       intentType: input.type,
       chainFamily: input.family,
       networkId: input.networkId,
       unsignedTransaction: input.unsigned,
       normalizedSummary: input.summary,
+      payloadHash: hash,
+      payloadVersion: 1,
       expiresAt: expires,
     }
   }

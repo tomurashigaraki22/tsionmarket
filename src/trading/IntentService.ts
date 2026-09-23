@@ -25,7 +25,15 @@ export class IntentService {
   ) {}
   async create(userId: string, input: { quoteId: string; idempotencyKey: string }) {
     const existing = await this.repo.existingIntent(userId, input.idempotencyKey)
-    if (existing) return { intent: existing, existing: true }
+    if (existing) {
+      if (existing.quoteId !== input.quoteId)
+        throw new AppError(
+          'IDEMPOTENCY_KEY_REUSED',
+          'Idempotency key was already used for another quote',
+          409,
+        )
+      return { intent: existing, existing: true }
+    }
     const quote = await this.repo.quote(userId, input.quoteId)
     if (!quote) throw new AppError('QUOTE_NOT_FOUND', 'Quote was not found', 404)
     if (quote.expiresAt.getTime() <= Date.now()) throw new AppError('QUOTE_EXPIRED', 'Quote has expired', 409)
@@ -110,6 +118,7 @@ export class IntentService {
             gas: gas.toString(),
             maxFeePerGas: fees.maxFeePerGas?.toString(),
             maxPriorityFeePerGas: fees.maxPriorityFeePerGas?.toString(),
+            gasPrice: (fees as unknown as { gasPrice?: bigint }).gasPrice?.toString(),
           },
         }
         await client.call({ account: from, to: token, data })
@@ -166,6 +175,7 @@ export class IntentService {
         gas: gas.toString(),
         maxFeePerGas: fees.maxFeePerGas?.toString(),
         maxPriorityFeePerGas: fees.maxPriorityFeePerGas?.toString(),
+        gasPrice: (fees as unknown as { gasPrice?: bigint }).gasPrice?.toString(),
       },
     }
     await client.call({ account: from, to, data, value })
