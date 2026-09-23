@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { AuthService } from '../src/auth/AuthService.js'
 import type { AuthRepository } from '../src/auth/AuthRepository.js'
+import { PasswordService } from '../src/auth/PasswordService.js'
 import { TokenService } from '../src/auth/TokenService.js'
 import { parseEnvironment } from '../src/config/env.js'
 
@@ -47,6 +48,31 @@ describe('authentication service security behavior', () => {
       statusCode: 401,
     })
     expect(repository.securityEvent).toHaveBeenCalledWith('auth.refresh', 'reuse_detected', context)
+  })
+
+  it('refuses login until the email address is verified', async () => {
+    const password = 'a uniquely strong password'
+    const passwordHash = await new PasswordService(environment.AUTH_PASSWORD_PEPPER).hash(password)
+    const repository = {
+      findUserByEmail: vi.fn().mockResolvedValue({
+        id: 'cf84f7e2-71cb-46ef-8194-79f0c27951da',
+        email: 'user@example.com',
+        status: 'pending_verification',
+        emailVerifiedAt: null,
+        tokenVersion: 0,
+        failedLoginCount: 0,
+        lockedUntil: null,
+        passwordHash,
+      }),
+      recordLoginFailure: vi.fn().mockResolvedValue(undefined),
+      securityEvent: vi.fn().mockResolvedValue(undefined),
+    } as unknown as AuthRepository
+    const service = new AuthService(repository, { send: vi.fn() }, environment)
+
+    await expect(service.login('user@example.com', password, context)).rejects.toMatchObject({
+      code: 'ACCOUNT_UNAVAILABLE',
+      statusCode: 403,
+    })
   })
 
   it('rejects stale token versions even when the JWT signature is valid', async () => {
