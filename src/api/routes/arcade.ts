@@ -6,6 +6,7 @@ import { requireIdentity } from '../../auth/middleware.js'
 import type { ArcadeRepository } from '../../arcade/ArcadeRepository.js'
 import type { RoundRepository } from '../../arcade/RoundRepository.js'
 import type { ArcadeLimits } from '../../arcade/ArcadeLimits.js'
+import type { DepositIntentService } from '../../arcade/DepositIntentService.js'
 
 export const commitSchema = z.object({ choice: z.union([z.literal(0), z.literal(1)]) }).strict()
 
@@ -46,7 +47,22 @@ export const limitsSchema = z
   })
   .strict()
 
-export function arcadeRoundsRouter(rounds: RoundRepository, limits: ArcadeLimits) {
+// A decimal string at USDC's six places, never a number — this is the amount
+// that will be signed for.
+export const depositSchema = z
+  .object({
+    amount: z.string().regex(/^\d+(\.\d{1,6})?$/),
+  })
+  .strict()
+export const submitDepositSchema = z
+  .object({ signedTransaction: z.string().min(20).max(200000) })
+  .strict()
+
+export function arcadeRoundsRouter(
+  rounds: RoundRepository,
+  limits: ArcadeLimits,
+  deposits: DepositIntentService,
+) {
   const router = Router()
   // A commit is one small write per player per tick, so the limit only exists
   // to stop a loop hammering the endpoint between deadlines.
@@ -190,6 +206,32 @@ export function arcadeRoundsRouter(rounds: RoundRepository, limits: ArcadeLimits
         data: await rounds.funding(requireIdentity(req).userId),
       }),
     ),
+  )
+
+  /**
+   * Builds the unsigned deposit transfer. The device signs it and calls
+   * /deposits/submit; nothing is credited until the transfer confirms.
+   */
+  router.post(
+    '/arcade/deposits/intent',
+    playLimit,
+    asyncHandler(async (req, res) => {
+      const input = depositSchema.parse(req.body)
+      res.json({
+        success: true,
+        data: await deposits.build(requireIdentity(req).userId, input.amount),
+      })
+    }),
+  )
+
+  router.post(
+    '/arcade/deposits/submit',
+    playLimit,
+    asyncHandler(async (req, res) => {
+      const input = submitDepositSchema.parse(req.body)
+      requireIdentity(req)
+      res.status(202).json({ success: true, data: await deposits.submit(input.signedTransaction) })
+    }),
   )
 
   router.get(

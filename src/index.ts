@@ -27,6 +27,7 @@ import { RoundRepository } from './arcade/RoundRepository.js'
 import { ArcadeWorker } from './arcade/ArcadeWorker.js'
 import { ArcadeLimits } from './arcade/ArcadeLimits.js'
 import { DepositWatcher } from './arcade/DepositWatcher.js'
+import { DepositIntentService } from './arcade/DepositIntentService.js'
 import { ProfileRepository } from './social/ProfileRepository.js'
 import { FloorRepository } from './social/FloorRepository.js'
 import { FloorService } from './social/FloorService.js'
@@ -60,6 +61,7 @@ const roundRepository = new RoundRepository(
 const arcadeWorker = new ArcadeWorker(roundRepository, 2000)
 const arcadeLimits = new ArcadeLimits(pool)
 const depositWatcher = new DepositWatcher(pool, rpcManager, environment)
+const depositIntents = new DepositIntentService(pool, rpcManager, environment)
 const profileRepository = new ProfileRepository(pool)
 const floorService = new FloorService(new FloorRepository(pool), profileRepository, pool)
 await portfolioRepository.applyNetworkMode(environment.NETWORK_MODE)
@@ -81,6 +83,7 @@ const app = createApp({
   arcadeRepository,
   roundRepository,
   arcadeLimits,
+  depositIntents,
 })
 const server = createServer(app)
 

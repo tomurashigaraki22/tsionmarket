@@ -266,9 +266,19 @@ function unscale(units: bigint): string {
   const fraction = digits.slice(-SCALE).replace(/0+$/, '')
   return `${digits.slice(0, -SCALE)}${fraction ? `.${fraction}` : ''}`
 }
-/** Rounds down, so the fee can never exceed what arrived. */
-export function bpsOf(amount: string, bps: number): string {
-  return unscale((scale(amount) * BigInt(bps)) / 10_000n)
+/**
+ * Rounds down, so the fee can never exceed what arrived.
+ *
+ * Quantised to the asset's own precision, not the ledger's eighteen places.
+ * USDC has six decimals, so a fee of 0.000000001 is not a small fee — it is an
+ * amount that cannot exist on chain, and carrying it would leave an internal
+ * balance that could never be paid out exactly. Dust therefore costs the house
+ * rather than the player.
+ */
+export function bpsOf(amount: string, bps: number, decimals = USDC_DECIMALS): string {
+  const exact = (scale(amount) * BigInt(bps)) / 10_000n
+  const step = 10n ** BigInt(SCALE - decimals)
+  return unscale((exact / step) * step)
 }
 export function subtractDecimal(left: string, right: string): string {
   return unscale(scale(left) - scale(right))

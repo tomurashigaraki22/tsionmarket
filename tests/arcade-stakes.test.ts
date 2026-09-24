@@ -7,7 +7,8 @@ import {
   rakeOf,
   subtract,
 } from '../src/arcade/StakeRepository.js'
-import { limitsSchema } from '../src/api/routes/arcade.js'
+import { depositSchema, limitsSchema } from '../src/api/routes/arcade.js'
+import { bpsOf, subtractDecimal } from '../src/arcade/DepositWatcher.js'
 
 /**
  * These are the money arithmetic, tested on their own because every one of
@@ -119,5 +120,38 @@ describe('responsible play input', () => {
 
   it('requires a real timestamp for a self-exclusion', () => {
     expect(() => limitsSchema.parse({ selfExcludedUntil: 'tomorrow' })).toThrow()
+  })
+})
+
+describe('deposit input', () => {
+  it('takes an amount as a decimal string at USDC precision', () => {
+    expect(depositSchema.parse({ amount: '25.5' }).amount).toBe('25.5')
+    expect(depositSchema.parse({ amount: '0.000001' }).amount).toBe('0.000001')
+  })
+
+  it('refuses a number, a negative, or more places than USDC has', () => {
+    expect(() => depositSchema.parse({ amount: 25 })).toThrow()
+    expect(() => depositSchema.parse({ amount: '-25' })).toThrow()
+    expect(() => depositSchema.parse({ amount: '0.0000001' })).toThrow()
+  })
+})
+
+describe('deposit fee', () => {
+  it('matches what the panel tells the player', () => {
+    // 0.1% of 100 is 0.1, so 99.9 is credited — the exact figure the funding
+    // panel renders before anyone sends anything.
+    expect(bpsOf('100', 10)).toBe('0.1')
+    expect(subtractDecimal('100', bpsOf('100', 10))).toBe('99.9')
+  })
+
+  it('rounds the fee down, so a deposit can never credit less than it should', () => {
+    // 0.1% of one micro-USDC is sub-atomic for a six-decimal asset, so the
+    // house takes nothing rather than carrying an unpayable fraction.
+    expect(bpsOf('0.000001', 10)).toBe('0')
+    expect(subtractDecimal('0.000001', bpsOf('0.000001', 10))).toBe('0.000001')
+  })
+
+  it('takes nothing when the house charges nothing', () => {
+    expect(bpsOf('100', 0)).toBe('0')
   })
 })
