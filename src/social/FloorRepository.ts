@@ -32,7 +32,7 @@ const POST_COLUMNS = `f.id, f.body, f.cited_market_id AS citedMarketId,
   f.created_at AS createdAt,
   p.user_id AS authorId, p.handle AS authorHandle, p.display_name AS authorName,
   p.avatar_seed AS authorAvatarSeed, u.role AS authorRole,
-  m.base_symbol AS citedSymbol, m.network_id AS citedNetworkId,
+  m.base_symbol AS citedSymbol, m.network_id AS citedNetworkId, m.icon_url AS citedIconUrl,
   CAST(m.price_usd AS CHAR) AS citedPriceUsd,
   CAST(m.price_change_24h_pct AS CHAR) AS citedPriceChange24hPct`
 
