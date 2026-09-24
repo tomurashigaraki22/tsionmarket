@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-return -- mysql2 RowDataPacket values cross a runtime database boundary */
 import type { Pool, RowDataPacket } from 'mysql2/promise'
 
 export type ArcadeGame = {
