@@ -38,6 +38,9 @@ import type { DepositIntentService } from './arcade/DepositIntentService.js'
 import { arcadeCatalogueRouter, arcadeRoundsRouter } from './api/routes/arcade.js'
 import type { ChessRepository } from './arcade/ChessRepository.js'
 import { chessRouter } from './api/routes/chess.js'
+import type { SettingsRepository } from './settings/SettingsRepository.js'
+import { settingsRouter } from './api/routes/settings.js'
+import type { WithdrawalIntentService } from './trading/WithdrawalIntentService.js'
 
 export type AppDependencies = {
   environment: Environment
@@ -59,6 +62,8 @@ export type AppDependencies = {
   arcadeLimits?: ArcadeLimits
   depositIntents?: DepositIntentService
   chessRepository?: ChessRepository
+  settingsRepository?: SettingsRepository
+  withdrawalIntentService?: WithdrawalIntentService
 }
 
 export function createApp({
@@ -81,6 +86,8 @@ export function createApp({
   arcadeLimits,
   depositIntents,
   chessRepository,
+  settingsRepository,
+  withdrawalIntentService,
 }: AppDependencies): Express {
   const app = express()
   app.disable('x-powered-by')
@@ -138,7 +145,10 @@ export function createApp({
     if (portfolioRepository && balanceService && ownershipService)
       app.use('/v1', portfolioRouter(portfolioRepository, balanceService, ownershipService))
     if (quoteService && intentService && transactionRepository)
-      app.use('/v1', tradingRouter(quoteService, intentService, transactionRepository))
+      app.use(
+        '/v1',
+        tradingRouter(quoteService, intentService, transactionRepository, withdrawalIntentService),
+      )
     if (transactionService && transactionRepository)
       app.use('/v1', transactionsRouter(transactionService, transactionRepository))
     if (valuationService && transactionRepository)
@@ -147,6 +157,7 @@ export function createApp({
       app.use('/v1', arcadeRoundsRouter(roundRepository, arcadeLimits, depositIntents))
     if (chessRepository) app.use('/v1', chessRouter(chessRepository))
     if (profileRepository && floorService) app.use('/v1', socialRouter(profileRepository, floorService))
+    if (settingsRepository) app.use('/v1', settingsRouter(settingsRepository))
   }
   app.use(notFound)
   app.use(errorHandler)

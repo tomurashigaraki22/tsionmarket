@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { bech32m } from '@scure/base'
 import bs58 from 'bs58'
 import nacl from 'tweetnacl'
 import { VersionedTransaction } from '@solana/web3.js'
@@ -35,6 +36,8 @@ export class TransactionService {
     let txHash: string, broadcast: () => Promise<string>
     try {
       if (intent.chainFamily === 'evm') ({ txHash, broadcast } = await this.verifyEvm(intent, signed))
+      else if (intent.chainFamily === 'intertrain')
+        ({ txHash, broadcast } = this.verifyIntertrain(intent, signed))
       else ({ txHash, broadcast } = this.verifySolana(intent, signed))
     } catch (error) {
       increment('submission_rejected_total')
@@ -132,4 +135,139 @@ export class TransactionService {
         ),
     }
   }
+
+  private verifyIntertrain(intent: StoredIntent, signed: string) {
+    const unsigned = intent.unsignedTransaction
+    const payload = (unsigned.payload ?? {}) as Record<string, unknown>
+    const from = typeof unsigned.from === 'string' ? unsigned.from : ''
+    const to = typeof unsigned.to === 'string' ? unsigned.to : ''
+    const publicKeyHex = typeof payload.publicKey === 'string' ? payload.publicKey.replace(/^0x/i, '') : ''
+    const signatureHex = signed.replace(/^0x/i, '')
+    const nonce = payload.nonce
+    const amount = typeof payload.amountRaw === 'string' ? payload.amountRaw : ''
+    const fee = typeof payload.feeRaw === 'string' ? payload.feeRaw : ''
+    const memo = typeof payload.memo === 'string' ? payload.memo : ''
+    if (
+      payload.kind !== 'native-transfer' ||
+      payload.version !== 1 ||
+      payload.chainId !== 'intertrain-1' ||
+      !Number.isSafeInteger(nonce) ||
+      !/^\d+$/.test(amount) ||
+      !/^\d+$/.test(fee) ||
+      !/^(?:[0-9a-f]{2}){32}$/i.test(publicKeyHex) ||
+      !/^(?:[0-9a-f]{2}){64}$/i.test(signatureHex)
+    )
+      throw new AppError('WITHDRAWAL_INTENT_INVALID', 'Intertrain transfer intent is malformed', 400)
+    const publicKey = Buffer.from(publicKeyHex, 'hex')
+    const signature = Buffer.from(signatureHex, 'hex')
+    if (intertrainAddressFromPublicKey(publicKey) !== from)
+      throw new AppError(
+        'SIGNED_TRANSACTION_MISMATCH',
+        'Intertrain signing key does not match the registered wallet',
+        400,
+      )
+    const signingBytes = intertrainTransferBytes({
+      chainId: 'intertrain-1',
+      from,
+      to,
+      nonce: Number(nonce),
+      amount: BigInt(amount),
+      fee: BigInt(fee),
+      publicKey,
+      memo,
+    })
+    if (!nacl.sign.detached.verify(signingBytes, signature, publicKey))
+      throw new AppError('SIGNED_TRANSACTION_INVALID', 'Intertrain transaction signature is invalid', 400)
+    const txHash = createHash('sha256')
+      .update(Buffer.concat([Buffer.from('MNA/tx/v1'), signingBytes]))
+      .digest('hex')
+    const network = NETWORKS.find((candidate) => candidate.networkId === intent.networkId)
+    if (!network || network.family !== 'intertrain')
+      throw new AppError('NETWORK_UNSUPPORTED', 'Intertrain network is unavailable', 503)
+    const broadcast = async () => {
+      const response = await this.rpc.intertrainRequest(network, 'transaction_broadcast', {
+        transaction: {
+          unsigned: {
+            version: 1,
+            chain_id: 'intertrain-1',
+            nonce: Number(nonce),
+            from,
+            to,
+            amount,
+            fee,
+            public_key: publicKeyHex.toLowerCase(),
+            memo,
+          },
+          signature: signatureHex.toLowerCase(),
+        },
+      })
+      const result = response as { hash?: unknown }
+      if (typeof result?.hash !== 'string')
+        throw new Error('Intertrain RPC did not return a transaction hash')
+      return result.hash.toLowerCase()
+    }
+    return { txHash, broadcast }
+  }
+}
+
+function intertrainTransferBytes(input: {
+  chainId: string
+  from: string
+  to: string
+  nonce: number
+  amount: bigint
+  fee: bigint
+  publicKey: Uint8Array
+  memo: string
+}): Uint8Array {
+  const prefix = new TextEncoder()
+  const concat = (...parts: Uint8Array[]) => {
+    const result = new Uint8Array(parts.reduce((size, part) => size + part.length, 0))
+    let offset = 0
+    for (const part of parts) {
+      result.set(part, offset)
+      offset += part.length
+    }
+    return result
+  }
+  const varint = (value: bigint | number) => {
+    let number = BigInt(value)
+    const bytes: number[] = []
+    do {
+      const byte = Number(number & 0x7fn)
+      number >>= 7n
+      bytes.push(number === 0n ? byte : byte | 0x80)
+    } while (number !== 0n)
+    return Uint8Array.from(bytes)
+  }
+  const string = (value: string) => {
+    const bytes = prefix.encode(value)
+    return concat(varint(bytes.length), bytes)
+  }
+  const address = (value: string) => {
+    const decoded = bech32m.decodeToBytes(value)
+    if (decoded.prefix !== 'mna' || decoded.bytes.length !== 21 || decoded.bytes[0] !== 1)
+      throw new AppError('WITHDRAWAL_INTENT_INVALID', 'Intertrain address in intent is malformed', 400)
+    return decoded.bytes
+  }
+  if (input.publicKey.length !== 32)
+    throw new AppError('WITHDRAWAL_INTENT_INVALID', 'Intertrain public key in intent is malformed', 400)
+  return concat(
+    new Uint8Array([1]),
+    string(input.chainId),
+    varint(input.nonce),
+    address(input.from),
+    address(input.to),
+    varint(input.amount),
+    varint(input.fee),
+    input.publicKey,
+    string(input.memo),
+  )
+}
+
+function intertrainAddressFromPublicKey(publicKey: Uint8Array): string {
+  const digest = createHash('sha256')
+    .update(Buffer.concat([Buffer.from('MNA/address/v1'), Buffer.from(publicKey)]))
+    .digest()
+  return bech32m.encodeFromBytes('mna', Buffer.concat([Buffer.from([1]), digest.subarray(0, 20)]))
 }

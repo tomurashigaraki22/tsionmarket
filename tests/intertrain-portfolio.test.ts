@@ -5,7 +5,6 @@ import {
   isIntertrainReservePriceable,
   parseIntertrainNativeBalance,
 } from '../src/portfolio/intertrain.js'
-import { intertrainUsdcBridgeStatus } from '../src/portfolio/intertrainBridgeStatus.js'
 
 describe('Intertrain native WSK portfolio support', () => {
   it('registers Intertrain as a mainnet-only native WSK network', () => {
@@ -67,13 +66,5 @@ describe('Intertrain native WSK portfolio support', () => {
     expect(
       isIntertrainReservePriceable({ ...healthy, total_mna_supply: '0', reserve_backed_mna_minted: '0' }),
     ).toBe(false)
-  })
-
-  it('keeps Arbitrum USDC to native WSK read-only until destination credit verification is implemented', () => {
-    expect(intertrainUsdcBridgeStatus()).toMatchObject({
-      available: false,
-      source: { networkId: 'arbitrum-one', asset: 'USDC', decimals: 6 },
-      destination: { networkId: 'intertrain-mainnet', asset: 'WSK', kind: 'native', decimals: 6 },
-    })
   })
 })

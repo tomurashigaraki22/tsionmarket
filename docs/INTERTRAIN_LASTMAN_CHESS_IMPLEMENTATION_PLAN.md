@@ -1,13 +1,14 @@
 # Intertrain, Last Man, and Chess — Implementation Plan
 
-**Status:** TsionMarket implementation plan, 24 September 2026
-**Scope:** TsionMarket backend and TsionMarket frontend only. Dashboard Revamp and WorldStreet Crypto Backend are read-only references for the Arbitrum bridge path.
-**Important:** The selected product route is Arbitrum One native USDC → native Intertrain WSK. The separate Ethereum USDC → wUSDC lane is explicitly out of scope and must remain unchanged.
+**Status:** Historical implementation plan, updated 24 September 2026
+**Scope:** TsionMarket backend and TsionMarket frontend only.
+
+> **Current product decision — bridge scope cancelled:** TsionMarket will not build or expose an Arbitrum USDC → Intertrain WSK bridge/swap flow. The wallet bridge panel, status API, and placeholder card have been removed. Arbitrum USDC remains on Arbitrum; native WSK remains on Intertrain. The bridge investigation and Phases 0/3 below are preserved only as historical context, not implementation instructions. The active Intertrain payment direction is direct native WSK transfers; username resolution is an app-level directory unless Intertrain confirms a native name-resolution service.
 
 ## Phase 2–5 execution update
 
 - **Phase 2 — implemented:** the frontend derives a domain-separated Intertrain Ed25519 account from the existing recovery seed, adds it without changing existing encrypted account records, migrates old wallets on unlock/backup import, and lets users explicitly select among unregistered Intertrain addresses.
-- **Phase 3 — fail-closed status only:** the Arbitrum `depositForWSK` contract is deployed, but the reviewed sources do not establish an independently verifiable event-to-native-WSK credit worker. TsionMarket exposes the exact Arbitrum USDC → WSK route and why settlement is pending; it does not create deposit intents or claim that an Arbitrum receipt is spendable WSK. No wUSDC path was added.
+- **Phase 3 — cancelled:** no bridge/swap flow is part of the product. The former read-only bridge status surface has been removed; the investigation below is retained as history only.
 - **Phases 4–5 — implemented for read-only balances:** the backend reads native six-decimal WSK through Intertrain `chain_info` and `account_get`, keeps it separate from Arbitrum USDC, and only applies $1 valuation when the live reserve state is unpaused, 1:1, and fully collateralized. An Intertrain RPC failure remains isolated from Arbitrum balances.
 - **Verification:** backend and frontend typechecks, targeted lint, full test suites, and production builds pass. Read-only mainnet RPC checks confirmed `intertrain-1`, native WSK, and the current 1:1 unpaused/collateralized reserve snapshot.
 
@@ -16,7 +17,7 @@
 - Make Last Man understandable to a first-time player: rule, round state, deadline, stake, and next action.
 - Replace the Intertrain username-purchase promotion with an honest “Coming soon” state.
 - Make Intertrain a coherent part of the wallet and portfolio, showing native WSK and Arbitrum USDC as distinct holdings.
-- Integrate only the Arbitrum USDC → native WSK path, with a verifiable pending-to-credited lifecycle.
+- Prepare direct native WSK send/receive, with the recipient resolved to a verified Intertrain address before local signing.
 - Build chess with real chess pieces, server-validated play, signed-in invite links, and safe, explicit stake handling.
 
 The requested accounting model is:
@@ -25,9 +26,9 @@ The requested accounting model is:
 | ---------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | Arbitrum USDC    | User’s source-chain token                                              | Arbitrum USDC balance; decrease only when its transaction confirms               |
 | Intertrain WSK   | Native Intertrain asset, six decimals                                  | Native balance; value at $1 only when live collateral/reserve policy supports it |
-| Bridge in flight | Arbitrum source transaction or destination WSK credit not yet verified | Pending activity, not spendable and never double-counted                         |
+| Transfer in flight | Native Intertrain WSK transaction submitted but not finalized | Pending activity; do not report as settled until Intertrain confirms it |
 
-**Target:** Arbitrum USDC → native Intertrain WSK via the deployed `depositForWSK` route. The user-facing operation must not promise completion until the source deposit and destination WSK credit are independently verified. Do not mint, credit, display, or route wUSDC as part of this work.
+**Current target:** Send and receive native WSK directly on Intertrain. No cross-chain deposit, swap, mint, or bridge crediting is in scope.
 
 ## What I checked locally
 
@@ -54,26 +55,26 @@ The requested accounting model is:
 - Dashboard’s Add Intertrain flow says it creates a separate account. `dashboard-revamp/lib/crypto-wallet/key-generation.ts` generates a random Ed25519 seed for Intertrain, while EVM uses another key family. This does not implement deriving Intertrain from the same wallet recovery material.
 - The current bridge UI uses timer-based approval progression and does not persist/resume one end-to-end operation after reload. History reads transaction records; it does not prove that the Intertrain mint landed.
 
-### Selected bridge path
+### Historical bridge investigation — cancelled, do not implement
 
 Proceed with **Arbitrum One native USDC → native Intertrain WSK** only. The Arbitrum contract is configured as `0x0729F81ACc0948089B0BAcc0685c461F8F54F23B` and its ABI is `depositForWSK(uint256,string)`. Preserve the deployed contract and its destination semantics. Before enabling production deposits, independently verify its source/events and the external watcher/relayer that observes deposits and credits WSK on Intertrain. Bytecode presence and `paused() === false` do not prove that a destination credit worker is live.
 
 The Ethereum USDC → wUSDC bridge, its `0x981f…` lane, wUSDC asset IDs, and all wUSDC mint/credit logic are not part of this work. Do not change, enable, disable, relabel, or migrate that lane.
 
-## Invariants
+## Current invariants
 
 1. The selected destination is native WSK only. Do not create or credit wUSDC in this route.
-2. An Arbitrum transfer is not complete when the wallet returns a transaction hash. Completion requires source confirmation, destination processing, and verified Intertrain WSK balance/operation evidence.
+2. Keep balances and transfers network-specific. An Arbitrum USDC balance is never an Intertrain WSK balance.
 3. Preserve encrypted wallet packages, backups, and funded addresses. No silent rekey or address replacement.
 4. Derive Intertrain Ed25519 identity from the same recoverable wallet root using a versioned, domain-separated path—not from a public 0x address and not by reusing an EVM private key as an Ed25519 seed.
 5. Users sign locally. Backend prepares/validates intents and reads status; operator credentials remain only in relayer infrastructure.
-6. Use canonical asset IDs and integer base units. No floating-point bridge, conversion, stake, or payout math.
+6. Use canonical asset IDs and integer base units. No floating-point payment, stake, or payout math.
 7. Show WSK at $1 only when live reserve/collateral state and approved policy support it; otherwise show stale/unavailable/degraded valuation honestly.
 8. Game outcomes and stake movements are server-authoritative and idempotent.
 
 ## Phases
 
-### Phase 0 — Arbitrum USDC → native WSK integration contract
+### Phase 0 — Arbitrum USDC → native WSK integration contract [CANCELLED]
 
 **Work**
 
@@ -112,7 +113,7 @@ The Ethereum USDC → wUSDC bridge, its `0x981f…` lane, wUSDC asset IDs, and a
 
 **Acceptance:** Existing backups still recover old accounts; new wallets derive Intertrain deterministically; old funded Intertrain addresses remain accessible.
 
-### Phase 3 — Arbitrum USDC → native Intertrain WSK settlement
+### Phase 3 — Arbitrum USDC → native Intertrain WSK settlement [CANCELLED]
 
 - Keep source chain explicitly Arbitrum One and token explicitly native USDC. Do not silently switch to Ethereum USDC or USDC.e.
 - Implement or integrate the verified `depositForWSK` observer/settlement path selected in Phase 0. Destination accounting is native WSK only.
@@ -130,7 +131,7 @@ The Ethereum USDC → wUSDC bridge, its `0x981f…` lane, wUSDC asset IDs, and a
 
 ### Phase 4 — Native WSK balance visibility and valuation
 
-- Show native WSK as its own Intertrain balance. Keep Arbitrum USDC on Arbitrum and pending bridge funds separate.
+- Show native WSK as its own Intertrain balance. Keep Arbitrum USDC visible only as a separate Arbitrum holding.
 - Display WSK at $1 only while live reserve/collateral state and product policy support that valuation. A valuation is not a redemption guarantee.
 
 **Acceptance:** Native WSK remains visible at zero/nonzero; Arbitrum USDC and pending deposits remain separate; WSK valuation shows its source/time and can degrade without hiding the balance.
@@ -138,7 +139,7 @@ The Ethereum USDC → wUSDC bridge, its `0x981f…` lane, wUSDC asset IDs, and a
 ### Phase 5 — Portfolio and wallet balance integration
 
 - Reuse the existing Crypto Backend Intertrain adapter for native WSK (`chain_info`, `account_get`, six decimals).
-- Show Arbitrum USDC, native Intertrain WSK, and pending WSK deposits as separate rows, grouped by network/account. Do not add wUSDC crediting to this integration.
+- Show Arbitrum USDC and native Intertrain WSK as separate rows, grouped by network/account. Do not imply that one can be swapped or bridged into the other.
 - Combine subtotals only with explicit valuation source/time; do not value pending deposits as spendable funds.
 - Use partial-failure states: Intertrain RPC failure must not hide Arbitrum balances; stale rows retain last-known values with timestamps/warnings.
 - Deduplicate by canonical network/account/asset identity; never count a pending Arbitrum deposit as a second spendable balance.
@@ -172,46 +173,42 @@ The Ethereum USDC → wUSDC bridge, its `0x981f…` lane, wUSDC asset IDs, and a
 
 ### Phase 9 — Shared activity, supportability, and polish
 
-- Align Wallet, Portfolio, Bridge, Last Man, and Chess to the black/mint design system with consistent network/asset labels and responsive layouts.
-- Add activity stages for approval, deposit, relay/mint, conversion, withdrawal, invite, stake reserve, result, refund, and payout.
-- Add safe-retry guidance and operator reconciliation for deposits without destination mint.
-- Monitor Arbitrum confirmations/relayer lag, Intertrain lane availability, reserve state, stale balances, failed intents, stuck operations, and settlement/refund backlog. Never log keys or operator secrets.
+- Align Wallet, Portfolio, Last Man, and Chess to the black/mint design system with consistent network/asset labels and responsive layouts.
+- Add activity stages for direct transfers, invite, stake reserve, result, refund, and payout.
+- Monitor Intertrain RPC availability, reserve state, stale balances, failed direct transfers, and game settlement/refund backlog. Never log keys or operator secrets.
 - Put hashes/raw IDs in expandable technical details rather than making them the primary experience.
 
 ### Phase 10 — Verification and staged rollout
 
 1. Unit tests: route identity, decimals, approval amount, invite tokens, chess rules, valuation.
-2. Integration tests: Arbitrum approval/deposit decoding, confirmations, idempotent WSK credit reconciliation, balance refresh, pause/cap failures, retries, restart recovery.
+2. Integration tests: recipient-name resolution, exact WSK amount/fee conversion, signed native transfer broadcast, confirmation, retries, and restart recovery.
 3. Backend tests: authentication/ownership, destination binding, intent validation, cross-account rejection, operation lifecycle, atomic game ledger.
 4. Frontend tests: rejected signatures, chain switching, approval delay, reload between steps, reconnect, stale/partial balances, mobile chess, accessibility.
-5. Read-only mainnet gate: compare the Arbitrum USDC token and `depositForWSK` contract, `paused()`, source events, Intertrain WSK account state, reserve status, and verified destination-credit worker. Do not gate this route on the separate Ethereum wUSDC registry lane.
-6. Controlled mainnet smoke test: only after the worker and contract semantics are verified, send an explicitly approved minimal amount and reconcile source event to native WSK credit before broader rollout.
+5. Read-only mainnet gate: verify Intertrain chain identity, native WSK decimals, destination resolution, and current account state.
+6. Controlled transfer smoke test: after transaction signing and confirmation are implemented, send an explicitly approved minimal native WSK amount and verify the recipient balance before broader rollout.
 
 **Release gates**
 
 - A: UI and non-monetary chess.
 - B: deterministic Intertrain account and read-only native WSK balance.
-- C: bridge status/history without enabling deposits.
-- D: Arbitrum USDC → native WSK only after contract semantics and destination-credit worker pass end-to-end checks.
+- C: direct native WSK transfers only after local signing, recipient review, fees, and finality are verified end-to-end.
 - F: staked chess after custody, payout, refund, responsible-play, and legal/product review.
 
-Rollback disables new operations without deleting wallets, submitted intents, bridge records, or ledger history. Pending transfers remain visible and reconcilable.
+Rollback disables new operations without deleting wallets, submitted transactions, or ledger history. Pending transfers remain visible and reconcilable.
 
 ## Repository boundary and ownership
 
-- **TsionMarket backend:** Intertrain network/ownership/balance/valuation APIs, fail-closed Arbitrum bridge status, Last Man and Chess services, and the authoritative game/stake ledger.
-- **TsionMarket frontend:** local wallet derivation and migration, wallet/portfolio/balance surfaces, bridge readiness and operation presentation, Last Man and Chess UX.
+- **TsionMarket backend:** Intertrain network/ownership/balance/valuation APIs, direct-transfer support, Last Man and Chess services, and the authoritative game/stake ledger.
+- **TsionMarket frontend:** local wallet derivation and migration, wallet/portfolio/balance surfaces, direct-transfer and recipient-resolution UX, Last Man and Chess UX.
 - **Dashboard Revamp and WorldStreet Crypto Backend:** reference-only. They may be inspected to verify the existing Arbitrum USDC → `depositForWSK` contract path and request/transaction conventions, but must not be edited by this implementation.
 - **WorldStreet Chain:** reference-only for native Intertrain address derivation, RPC response semantics, and reserve status. Do not modify it or its separate Ethereum → wUSDC lane.
 
-The destination-credit worker is not present in the two implementation repositories. Therefore the TsionMarket bridge surface must remain read-only/unavailable until its source receipt and destination WSK credit can be independently tied together; source-chain success alone is never shown as completed funds.
+No destination-credit worker is required for the current product direction because cross-chain bridge/swap flows are cancelled. Direct transfers settle on Intertrain.
 
 ## Explicitly out of scope
 
+- Any bridge or swap between Arbitrum USDC and Intertrain WSK.
 - Any Ethereum → wUSDC integration, wUSDC crediting, or wUSDC lane changes.
-- Treating the selected Arbitrum → native WSK route as wUSDC.
-- Redeploying an existing bridge solely because roadmap or legacy docs say “not deployed.”
-- Enabling Arbitrum deposits before the `depositForWSK` destination-credit worker is verified.
 - Exposing relayer credentials, changing key derivation, or moving funded accounts without a migration.
 - Launching staked chess before settlement, withdrawal, and responsible-play guarantees are clear.
 
@@ -222,11 +219,11 @@ The destination-credit worker is not present in the two implementation repositor
 - **Phase 6 — Chess:** the backend uses `chess.js` as the rules authority. Matches store a canonical FEN, replayable PGN, versioned move records, captures, and server-side clocks. Castling, en passant, promotions, checkmate, stalemate, repetition, insufficient material, fifty-move draws, resignation, draw agreement, and clock expiry are handled server-side. Move writes are row-locked and reject illegal, out-of-turn, or stale versions. The frontend renders SVG pieces, automatic player orientation, legal destinations, last-move/check highlights, promotion selection, clocks, captures, move sheet, PGN, and a reconnecting match URL.
 - **Phase 7 — Invites:** creating, previewing, accepting, declining, cancelling, and playing require authentication. Invitation links use 256-bit random tokens; only SHA-256 hashes are stored, tokens are single-use, and links expire after 24 hours. Acceptance is transactional and rejects self-join/races. Invitee links survive the login redirect, after which the backend rechecks the invitation. The invite API carries tokens in the request body, not logged route paths.
 - **Phase 8 — Safety boundary:** chess currently has **no stake, deposit, entry charge, prize, or payout path**. This is intentional: the existing Arcade balance is an internal credit and the withdrawal/custody/dispute guarantees are not approved. The invitation schema rejects stake/network fields and the UI states that paid matches are unavailable. Release gate F remains closed.
-- **Phase 9 — Chess operations/polish:** moves and final PGN are persisted for support and replay; a worker expires invitations and settles clock deadlines; participant-only match reads avoid exposing account identifiers. No signing keys or relayer credentials are used. The cross-product shared activity feed and bridge-operator reconciliation/metrics remain separate follow-up work; the bridge remains fail-closed until a destination-credit verifier exists.
-- **Phase 10 — verification:** backend rules/API tests cover legal variants, draws, flag fall, authentication, strict no-stake request shapes, and malformed move rejection. Frontend type checks, tests, and production build are run before this change is pushed. A real-MySQL lifecycle test and any mainnet bridge smoke test still require the deployment DB and independently verified bridge credit worker; no mainnet funds are sent by this change.
+- **Phase 9 — Chess operations/polish:** moves and final PGN are persisted for support and replay; a worker expires invitations and settles clock deadlines; participant-only match reads avoid exposing account identifiers. No signing keys or relayer credentials are used. The cross-product shared activity feed remains separate follow-up work.
+- **Phase 10 — verification:** backend rules/API tests cover legal variants, draws, flag fall, authentication, strict no-stake request shapes, and malformed move rejection. Frontend type checks, tests, and production build are run before changes are pushed. A real-MySQL lifecycle test still requires the deployment DB; no mainnet funds are sent by the chess changes.
 
 ### Remaining release gates
 
 1. Apply backend migration `0022_chess_matches.sql` in each deployed environment before using Chess.
 2. Keep paid Chess disabled until custody and withdrawal, settlement/refund/dispute policy, responsible-play controls, and legal/product review are approved.
-3. Keep Arbitrum USDC → native WSK deposits unavailable until the destination-credit worker and source-to-destination reconciliation pass the read-only and controlled-smoke gates above.
+3. Keep direct Intertrain sends disabled until locally signed transaction construction, exact fee handling, recipient verification, and finality have passed the read-only and controlled-smoke gates above.

@@ -2,7 +2,7 @@ export type OwnedAccount = {
   id: string
   networkId: string
   address: string
-  family: 'evm' | 'solana'
+  family: 'evm' | 'solana' | 'intertrain'
   chainId: number | null
 }
 export type QuoteRecord = {

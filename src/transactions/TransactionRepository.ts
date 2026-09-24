@@ -8,7 +8,7 @@ export type StoredIntent = {
   userId: string
   accountId: string
   quoteId: string | null
-  chainFamily: 'evm' | 'solana'
+  chainFamily: 'evm' | 'solana' | 'intertrain'
   networkId: string
   status: string
   unsignedTransaction: Record<string, unknown>
@@ -66,7 +66,7 @@ export class TransactionRepository {
         summary = intent.normalizedSummary,
         to = typeof summary.to === 'string' ? summary.to : null
       await connection.execute(
-        `INSERT INTO transaction_records(id,intent_id,quote_id,user_id,account_id,chain_family,network_id,tx_hash,status,from_address,to_address,signed_payload_hash,summary,provider,next_reconcile_at) VALUES(?,?,?,?,?,?,?,?, 'broadcasting',?,?,?,?, 'lifi',NOW(6))`,
+        `INSERT INTO transaction_records(id,intent_id,quote_id,user_id,account_id,chain_family,network_id,tx_hash,status,from_address,to_address,signed_payload_hash,summary,provider,next_reconcile_at) VALUES(?,?,?,?,?,?,?,?, 'broadcasting',?,?,?,?, ?,NOW(6))`,
         [
           id,
           intent.id,
@@ -80,6 +80,7 @@ export class TransactionRepository {
           to,
           signedHash,
           JSON.stringify(summary),
+          intent.normalizedSummary.action === 'wallet-withdrawal' ? `${intent.chainFamily}-rpc` : 'lifi',
         ],
       )
       await connection.commit()

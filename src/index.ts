@@ -29,6 +29,8 @@ import { ArcadeLimits } from './arcade/ArcadeLimits.js'
 import { DepositWatcher } from './arcade/DepositWatcher.js'
 import { DepositIntentService } from './arcade/DepositIntentService.js'
 import { ChessRepository } from './arcade/ChessRepository.js'
+import { SettingsRepository } from './settings/SettingsRepository.js'
+import { WithdrawalIntentService } from './trading/WithdrawalIntentService.js'
 import { ChessWorker } from './arcade/ChessWorker.js'
 import { ProfileRepository } from './social/ProfileRepository.js'
 import { FloorRepository } from './social/FloorRepository.js'
@@ -50,6 +52,7 @@ const marketRegistryWorker = new MarketRegistryWorker(marketRepository, environm
 const tradingRepository = new TradingRepository(pool)
 const quoteService = new QuoteService(tradingRepository, new LifiProvider(environment), environment)
 const intentService = new IntentService(tradingRepository, rpcManager, environment)
+const withdrawalIntentService = new WithdrawalIntentService(tradingRepository, rpcManager, environment)
 const transactionRepository = new TransactionRepository(pool)
 const transactionService = new TransactionService(transactionRepository, rpcManager, environment)
 const reconciliationWorker = new ReconciliationWorker(transactionRepository, rpcManager, environment)
@@ -65,6 +68,7 @@ const arcadeLimits = new ArcadeLimits(pool)
 const depositWatcher = new DepositWatcher(pool, rpcManager, environment)
 const depositIntents = new DepositIntentService(pool, rpcManager, environment)
 const chessRepository = new ChessRepository(pool)
+const settingsRepository = new SettingsRepository(pool)
 const chessWorker = new ChessWorker(chessRepository)
 const profileRepository = new ProfileRepository(pool)
 const floorService = new FloorService(new FloorRepository(pool), profileRepository, pool)
@@ -89,6 +93,8 @@ const app = createApp({
   arcadeLimits,
   depositIntents,
   chessRepository,
+  settingsRepository,
+  withdrawalIntentService,
 })
 const server = createServer(app)
 

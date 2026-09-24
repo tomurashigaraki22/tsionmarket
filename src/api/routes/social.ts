@@ -16,7 +16,11 @@ const handleSchema = z
   })
 
 export const createProfileSchema = z
-  .object({ handle: handleSchema, displayName: z.string().trim().min(1).max(50) })
+  .object({
+    handle: handleSchema,
+    displayName: z.string().trim().min(1).max(50),
+    intertrainAccountId: z.string().uuid().optional(),
+  })
   .strict()
 
 export const updateProfileSchema = z
@@ -114,8 +118,20 @@ export function socialRouter(profiles: ProfileRepository, floor: FloorService) {
         userId: requireIdentity(req).userId,
         handle: input.handle,
         displayName: input.displayName,
+        intertrainAccountId: input.intertrainAccountId,
       })
       res.status(201).json({ success: true, data: profile })
+    }),
+  )
+
+  router.patch(
+    '/profiles/me/intertrain-account',
+    asyncHandler(async (req, res) => {
+      const input = z.object({ accountId: z.string().uuid().nullable() }).strict().parse(req.body)
+      res.json({
+        success: true,
+        data: await profiles.linkIntertrainAccount(requireIdentity(req).userId, input.accountId),
+      })
     }),
   )
 

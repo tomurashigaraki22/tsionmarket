@@ -89,6 +89,52 @@ export class ReconciliationWorker {
         }
         return
       }
+      if (record.chainFamily === 'intertrain') {
+        const response = await this.rpc.intertrainRequest(network, 'transaction_status', {
+          hash: record.txHash,
+        })
+        const candidateStatus = (response as { status?: unknown })?.status
+        const status = typeof candidateStatus === 'string' ? candidateStatus.toLowerCase() : ''
+        if (status === 'confirmed' || status === 'finalized') {
+          await this.repo.reconcile(
+            record.id,
+            'confirmed',
+            attempt,
+            this.env.TRANSACTION_RECONCILE_MAX_ATTEMPTS,
+          )
+          return
+        }
+        if (status === 'failed' || status === 'reverted') {
+          await this.repo.reconcile(
+            record.id,
+            'failed',
+            attempt,
+            this.env.TRANSACTION_RECONCILE_MAX_ATTEMPTS,
+            `Intertrain transaction ${status}`,
+          )
+          return
+        }
+        if (status === 'pending' || status === 'accepted') {
+          await this.repo.reconcile(
+            record.id,
+            'submitted',
+            attempt,
+            this.env.TRANSACTION_RECONCILE_MAX_ATTEMPTS,
+          )
+          return
+        }
+        const old = Date.now() - new Date(record.createdAt).getTime() > 30 * 60_000
+        await this.repo.reconcile(
+          record.id,
+          old ? 'dropped' : 'unknown',
+          attempt,
+          this.env.TRANSACTION_RECONCILE_MAX_ATTEMPTS,
+          old
+            ? 'Intertrain transaction not found after 30 minutes'
+            : 'Intertrain RPC has not indexed transaction',
+        )
+        return
+      }
       const statuses = await this.rpc.solana(network, (connection) =>
           connection.getSignatureStatuses([record.txHash], { searchTransactionHistory: true }),
         ),

@@ -19,6 +19,16 @@ export const canonicalHash = (value: unknown) =>
     .digest('hex')
 export class TradingRepository {
   constructor(private pool: Pool) {}
+  async marketTokens(
+    networkId: string,
+  ): Promise<Array<{ address: string; symbol: string; decimals: number }>> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT base_token AS address,base_symbol AS symbol,decimals FROM spot_markets WHERE network_id=? AND active=TRUE
+       UNION SELECT quote_token AS address,quote_symbol AS symbol,6 AS decimals FROM spot_markets WHERE network_id=? AND active=TRUE`,
+      [networkId, networkId],
+    )
+    return rows as Array<{ address: string; symbol: string; decimals: number }>
+  }
   async account(userId: string, id: string): Promise<OwnedAccount | null> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT a.id,a.network_id AS networkId,a.address,n.family,n.chain_id AS chainId FROM wallet_accounts a JOIN networks n ON n.network_id=a.network_id AND n.enabled=TRUE WHERE a.id=? AND a.user_id=? AND a.status='active' AND a.ownership_status='verified'`,
@@ -128,9 +138,9 @@ export class TradingRepository {
   async createIntent(input: {
     userId: string
     accountId: string
-    quoteId: string
+    quoteId: string | null
     key: string
-    type: 'swap' | 'erc20_approval'
+    type: 'swap' | 'erc20_approval' | 'withdrawal'
     family: string
     networkId: string
     unsigned: unknown
