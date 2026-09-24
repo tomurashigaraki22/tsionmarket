@@ -30,6 +30,8 @@ export type ChartPayload = {
   source: ChartSource | null
   /** Intervals this token can actually be drawn at, given the source that answered. */
   intervals: Array<string>
+  /** Timestamp of the oldest bar, passed back to request older history. */
+  nextCursor: number | null
 }
 
 /** Bar length in seconds for each interval the chart offers. */
@@ -43,8 +45,7 @@ export const INTERVAL_SECONDS: Record<string, number> = {
 }
 
 export function num(value: unknown): number | null {
-  const parsed =
-    typeof value === 'string' ? Number(value) : typeof value === 'number' ? value : NaN
+  const parsed = typeof value === 'string' ? Number(value) : typeof value === 'number' ? value : NaN
   return Number.isFinite(parsed) ? parsed : null
 }
 
@@ -74,19 +75,21 @@ export function pickBestPool(rows: ReadonlyArray<PoolRow> | undefined): string |
 }
 
 function ascendingDistinct(candles: Array<Candle>): Array<Candle> {
-  return candles
-    .filter(
-      (candle) =>
-        Number.isFinite(candle.time) &&
-        Number.isFinite(candle.open) &&
-        Number.isFinite(candle.high) &&
-        Number.isFinite(candle.low) &&
-        Number.isFinite(candle.close),
-    )
-    // Upstreams return newest-first; the chart requires strictly ascending
-    // time and throws on a duplicate timestamp.
-    .sort((a, b) => a.time - b.time)
-    .filter((candle, index, all) => index === 0 || candle.time !== all[index - 1]?.time)
+  return (
+    candles
+      .filter(
+        (candle) =>
+          Number.isFinite(candle.time) &&
+          Number.isFinite(candle.open) &&
+          Number.isFinite(candle.high) &&
+          Number.isFinite(candle.low) &&
+          Number.isFinite(candle.close),
+      )
+      // Upstreams return newest-first; the chart requires strictly ascending
+      // time and throws on a duplicate timestamp.
+      .sort((a, b) => a.time - b.time)
+      .filter((candle, index, all) => index === 0 || candle.time !== all[index - 1]?.time)
+  )
 }
 
 /** `[time, open, high, low, close, volume]` rows → candles the chart can take. */

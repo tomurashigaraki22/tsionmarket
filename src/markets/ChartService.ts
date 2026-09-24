@@ -28,6 +28,7 @@ import {
   pickBestPool,
   stats24hFrom,
   type ChartPayload,
+  type ChartSource,
 } from './chartData.js'
 
 const GECKO = 'https://api.geckoterminal.com/api/v2'
@@ -101,8 +102,10 @@ export class ChartService {
     token: string
     interval: string
     coinId?: string | undefined
+    before?: number | undefined
+    source?: ChartSource | undefined
   }): Promise<ChartPayload> {
-    const key = `${input.networkId}:${input.token.toLowerCase()}:${input.coinId ?? ''}:${input.interval}`
+    const key = `${input.networkId}:${input.token.toLowerCase()}:${input.coinId ?? ''}:${input.interval}:${input.before ?? 'latest'}:${input.source ?? 'auto'}`
     const hit = read(this.charts, key)
     if (hit) return hit
 
@@ -114,8 +117,7 @@ export class ChartService {
         // Intraday bars move; a daily bar does not. An empty answer is cached
         // briefly too, so an unlisted token is not re-asked on every poll —
         // but briefly, because empty is often a transient provider miss.
-        const ttl =
-          payload.candles.length === 0 ? 10_000 : input.interval === '1d' ? 5 * 60_000 : 45_000
+        const ttl = payload.candles.length === 0 ? 10_000 : input.interval === '1d' ? 5 * 60_000 : 45_000
         write(this.charts, key, payload, ttl)
         return payload
       })
@@ -130,20 +132,31 @@ export class ChartService {
     token: string
     interval: string
     coinId?: string | undefined
+    before?: number | undefined
+    source?: ChartSource | undefined
   }): Promise<ChartPayload> {
-    const { networkId, token, interval, coinId } = input
+    const { networkId, token, interval, coinId, before, source } = input
 
     // Each provider gets its own budget: a slow or rate-limited first source
     // must not consume the time the fallbacks need.
     if (token) {
-      const priced = await attempt(() => this.fromBirdeye(networkId, token, interval))
+      const priced =
+        source && source !== 'birdeye'
+          ? null
+          : await attempt(() => this.fromBirdeye(networkId, token, interval, before))
       if (priced) return priced
 
-      const pooled = await attempt(() => this.fromPool(networkId, token, interval))
+      const pooled =
+        source && source !== 'geckoterminal'
+          ? null
+          : await attempt(() => this.fromPool(networkId, token, interval, before))
       if (pooled) return pooled
     }
     if (coinId) {
-      const listed = await attempt(() => this.fromCoingecko(coinId, interval))
+      const listed =
+        source && source !== 'coingecko'
+          ? null
+          : await attempt(() => this.fromCoingecko(coinId, interval, before))
       if (listed) return listed
     }
 
@@ -155,6 +168,7 @@ export class ChartService {
       stats: null,
       source: null,
       intervals: coinId && !token ? COINGECKO_INTERVALS : ALL_INTERVALS,
+      nextCursor: null,
     }
   }
 
@@ -163,6 +177,7 @@ export class ChartService {
     networkId: string,
     token: string,
     interval: string,
+    before?: number,
   ): Promise<ChartPayload | null> {
     const chain = BIRDEYE_CHAIN[networkId]
     const type = BIRDEYE_TYPE[interval]
@@ -170,7 +185,7 @@ export class ChartService {
     const apiKey = this.env.BIRDEYE_API_KEY
     if (!chain || !type || !seconds || !apiKey) return null
 
-    const to = Math.floor(Date.now() / 1000)
+    const to = before ? before - 1 : Math.floor(Date.now() / 1000)
     const url = new URL(`${BIRDEYE}/defi/ohlcv`)
     url.searchParams.set('address', token)
     url.searchParams.set('type', type)
@@ -203,6 +218,7 @@ export class ChartService {
       stats: { ...stats24hFrom(candles), volume24h: volume24h > 0 ? volume24h : null },
       source: 'birdeye',
       intervals: ALL_INTERVALS,
+      nextCursor: candles[0]?.time ?? null,
     }
   }
 
@@ -211,6 +227,7 @@ export class ChartService {
     networkId: string,
     token: string,
     interval: string,
+    before?: number,
   ): Promise<ChartPayload | null> {
     const slug = CHAIN_SLUG[networkId]
     const timeframe = TIMEFRAME[interval]
@@ -227,6 +244,7 @@ export class ChartService {
     // the token, but in a USDC/TOKEN pool it is not, and charting the base
     // blindly would draw the price upside down.
     url.searchParams.set('token', token)
+    if (before) url.searchParams.set('before_timestamp', String(before - 1))
 
     const signal = AbortSignal.timeout(UPSTREAM_TIMEOUT_MS)
     const [ohlcv, poolDetail] = await Promise.all([
@@ -259,6 +277,7 @@ export class ChartService {
       stats: { ...stats24hFrom(candles), volume24h },
       source: 'geckoterminal',
       intervals: ALL_INTERVALS,
+      nextCursor: candles[0]?.time ?? null,
     }
   }
 
@@ -268,7 +287,14 @@ export class ChartService {
    * anywhere. Without this, those markets would show a price in the list and a
    * blank chart beside it.
    */
-  private async fromCoingecko(coinId: string, interval: string): Promise<ChartPayload | null> {
+  private async fromCoingecko(
+    coinId: string,
+    interval: string,
+    before?: number,
+  ): Promise<ChartPayload | null> {
+    // CoinGecko's sampled chart endpoint has no older-page cursor. Never mix
+    // those samples with OHLC bars from a different provider.
+    if (before) return null
     const days = COINGECKO_DAYS[interval] ?? COINGECKO_DAYS['1h']
     const url = new URL(`${COINGECKO}/coins/${encodeURIComponent(coinId)}/market_chart`)
     url.searchParams.set('vs_currency', 'usd')
@@ -293,6 +319,7 @@ export class ChartService {
       stats: { ...stats24hFrom(candles), volume24h: null },
       source: 'coingecko',
       intervals: COINGECKO_INTERVALS,
+      nextCursor: null,
     }
   }
 

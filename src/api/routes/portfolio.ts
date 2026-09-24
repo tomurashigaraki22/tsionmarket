@@ -26,6 +26,12 @@ export const ownershipProofInputSchema = z
   .strict()
 
 export const balancesQuerySchema = z.object({ refresh: z.enum(['true', 'false']).default('false') }).strict()
+export const assetBalanceQuerySchema = z
+  .object({
+    accountId: z.string().uuid(),
+    token: z.string().min(1).max(128),
+  })
+  .strict()
 export function portfolioRouter(
   repo: PortfolioRepository,
   balances: BalanceService,
@@ -68,6 +74,16 @@ export function portfolioRouter(
         ownershipProofInputSchema.parse(req.body),
       )
       res.status(result.existing ? 200 : 201).json({ success: true, data: result })
+    }),
+  )
+  router.get(
+    '/wallets/me/balances/asset',
+    asyncHandler(async (req, res) => {
+      const query = assetBalanceQuerySchema.parse(req.query)
+      res.json({
+        success: true,
+        data: await balances.assetBalance(requireIdentity(req).userId, query.accountId, query.token),
+      })
     }),
   )
   router.get(

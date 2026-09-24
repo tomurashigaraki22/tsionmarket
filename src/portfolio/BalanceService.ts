@@ -8,6 +8,8 @@ import type { Account, PortfolioRepository } from './PortfolioRepository.js'
 import type { RpcManager } from './RpcManager.js'
 
 const erc20 = parseAbi(['function balanceOf(address owner) view returns (uint256)'])
+const TOKEN_PROGRAM = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
+const TOKEN_2022_PROGRAM = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')
 type AssetBalance = {
   assetId: string
   symbol: string
@@ -36,6 +38,65 @@ export class BalanceService {
     private rpc: RpcManager,
     private env: Environment,
   ) {}
+  async assetBalance(userId: string, accountId: string, token: string): Promise<AssetBalance> {
+    const account = (await this.repo.listAccounts(userId)).find(
+      (item) => item.id === accountId && item.ownershipStatus === 'verified',
+    )
+    if (!account) throw new AppError('ACCOUNT_NOT_FOUND', 'Verified account not found', 404)
+    const network = NETWORKS.find((item) => item.networkId === account.networkId)
+    if (!network) throw new AppError('NETWORK_UNSUPPORTED', 'Network is not supported', 400)
+    const known = [
+      ...(await this.repo.marketTokens(account.networkId)),
+      ...(BALANCE_TOKENS[account.networkId] ?? []),
+    ].find((item) => item.address.toLowerCase() === token.toLowerCase())
+    if (!known) throw new AppError('TOKEN_NOT_LISTED', 'Token is not listed on this network', 400)
+    const native =
+      token === 'So11111111111111111111111111111111111111112' ||
+      ['0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'].some(
+        (wrapped) => wrapped.toLowerCase() === token.toLowerCase(),
+      )
+    if (network.family === 'solana') {
+      const snapshot = await this.portfolio(userId)
+      const result = snapshot.accounts.find((item) => item.accountId === accountId)
+      if (result?.state !== 'ready')
+        throw new AppError(
+          'BALANCE_UNAVAILABLE',
+          result?.error?.message ?? 'Balance provider unavailable',
+          503,
+        )
+      const asset = result.assets.find(
+        (item) => item.assetId === token || (native && item.assetId === 'native'),
+      )
+      return (
+        asset ?? {
+          assetId: token,
+          symbol: known.symbol,
+          decimals: known.decimals,
+          raw: '0',
+          formatted: '0',
+          supported: true,
+        }
+      )
+    }
+    const client = this.rpc.evmClient(network)
+    const raw = native
+      ? await client.getBalance({ address: account.address as `0x${string}` })
+      : await client.readContract({
+          address: token as `0x${string}`,
+          abi: erc20,
+          functionName: 'balanceOf',
+          args: [account.address as `0x${string}`],
+        })
+    const decimals = native ? network.nativeDecimals : known.decimals
+    return {
+      assetId: native ? 'native' : token,
+      symbol: native ? network.nativeSymbol : known.symbol,
+      decimals,
+      raw: raw.toString(),
+      formatted: formatUnits(raw, decimals),
+      supported: true,
+    }
+  }
   async portfolio(userId: string, force = false): Promise<PortfolioSnapshot> {
     const cached = this.cache.get(userId)
     if (!force && cached && cached.expires > Date.now()) return cached.value
@@ -149,12 +210,14 @@ export class BalanceService {
       }
       const owner = new PublicKey(account.address),
         assets: AssetBalance[] = []
+      const marketTokens = await this.repo.marketTokens(network.networkId)
       await this.rpc.solana(network, async (connection) => {
-        const [lamports, tokens] = await Promise.all([
+        const [lamports, legacyTokens, token2022] = await Promise.all([
           connection.getBalance(owner),
           connection.getParsedTokenAccountsByOwner(owner, {
-            programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),
+            programId: TOKEN_PROGRAM,
           }),
+          connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_2022_PROGRAM }),
         ])
         assets.push({
           assetId: 'native',
@@ -164,19 +227,30 @@ export class BalanceService {
           formatted: formatUnits(BigInt(lamports), 9),
           supported: true,
         })
-        const allow = new Map((BALANCE_TOKENS[network.networkId] ?? []).map((t) => [t.address, t]))
-        for (const row of tokens.value) {
+        const allow = new Map(
+          [...marketTokens, ...(BALANCE_TOKENS[network.networkId] ?? [])].map((t) => [t.address, t]),
+        )
+        const holdings = new Map<string, { raw: bigint; decimals: number }>()
+        for (const row of [...legacyTokens.value, ...token2022.value]) {
           const info = row.account.data.parsed.info,
             meta = allow.get(info.mint)
-          if (meta)
-            assets.push({
-              assetId: info.mint,
-              symbol: meta.symbol,
-              decimals: meta.decimals,
-              raw: info.tokenAmount.amount,
-              formatted: formatUnits(BigInt(info.tokenAmount.amount), meta.decimals),
-              supported: true,
-            })
+          if (!meta) continue
+          const current = holdings.get(info.mint)
+          holdings.set(info.mint, {
+            raw: (current?.raw ?? 0n) + BigInt(info.tokenAmount.amount),
+            decimals: Number(info.tokenAmount.decimals),
+          })
+        }
+        for (const [mint, holding] of holdings) {
+          const meta = allow.get(mint)!
+          assets.push({
+            assetId: mint,
+            symbol: meta.symbol,
+            decimals: holding.decimals,
+            raw: holding.raw.toString(),
+            formatted: formatUnits(holding.raw, holding.decimals),
+            supported: true,
+          })
         }
       })
       return {

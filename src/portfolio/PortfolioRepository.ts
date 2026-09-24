@@ -11,6 +11,15 @@ export type Account = {
 }
 export class PortfolioRepository {
   constructor(private pool: Pool) {}
+  async marketTokens(
+    networkId: string,
+  ): Promise<Array<{ address: string; symbol: string; decimals: number }>> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT base_token AS address,base_symbol AS symbol,decimals FROM spot_markets WHERE network_id=? AND active=TRUE UNION SELECT quote_token AS address,quote_symbol AS symbol,6 AS decimals FROM spot_markets WHERE network_id=? AND active=TRUE`,
+      [networkId, networkId],
+    )
+    return rows as Array<{ address: string; symbol: string; decimals: number }>
+  }
   async listAccounts(userId: string): Promise<Account[]> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT a.id,a.network_id AS networkId,a.address,n.family,a.ownership_status AS ownershipStatus FROM wallet_accounts a JOIN networks n ON n.network_id=a.network_id WHERE a.user_id=? AND a.status='active' AND n.enabled=TRUE ORDER BY n.sort_order,a.created_at`,

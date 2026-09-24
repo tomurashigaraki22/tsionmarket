@@ -12,6 +12,8 @@ export const chartQuerySchema = z
     interval: z.enum(Object.keys(INTERVAL_SECONDS) as [string, ...Array<string>]).default('1h'),
     // The registry's chart_symbol — a CoinGecko coin id, where it has one.
     coinId: z.string().max(128).optional(),
+    before: z.coerce.number().int().positive().optional(),
+    source: z.enum(['birdeye', 'geckoterminal', 'coingecko']).optional(),
   })
   .strict()
 export const marketQuerySchema = z
@@ -38,6 +40,8 @@ export function marketsRouter(repo: MarketRepository, staleAfter: number, charts
           token: query.token,
           interval: query.interval,
           coinId: query.coinId,
+          before: query.before,
+          source: query.source,
         }),
       })
     }),
