@@ -145,7 +145,7 @@ export class DepositIntentService {
           credited: `${credited} ${ASSET}`,
           to: house,
         },
-        payloadHash: await canonicalHash(unsignedTransaction),
+        payloadHash: canonicalHash(unsignedTransaction),
         payloadVersion: 1,
         // A blockhash is only good for a couple of minutes, so the quote for
         // signing expires with it rather than failing at broadcast.
@@ -181,7 +181,7 @@ function toBaseUnits(value: string, decimals: number): bigint {
  * Matches the frontend's canonical hash byte for byte: the device recomputes
  * it and refuses to sign on a mismatch.
  */
-async function canonicalHash(value: unknown): Promise<string> {
+function canonicalHash(value: unknown): string {
   const canonical = (input: unknown): unknown => {
     if (Array.isArray(input)) return input.map(canonical)
     if (input && typeof input === 'object')
