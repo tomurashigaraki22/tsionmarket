@@ -13,6 +13,9 @@ const JOIN_WINDOW_SECONDS = 45
 const TICK_SECONDS = 15
 const MIN_PLAYERS = 3
 const MAX_PLAYERS = 100
+// A tick is seconds long, so the stream reads more often than the game moves.
+const STREAM_POLL_MS = 1_000
+const STREAM_HEARTBEAT_MS = 15_000
 
 /**
  * The catalogue is public; everything that touches a round is not, and is
@@ -83,6 +86,68 @@ export function arcadeRoundsRouter(rounds: RoundRepository) {
       const userId = requireIdentity(req).userId
       await rounds.commit(id, userId, input.choice)
       res.json({ success: true, data: await rounds.view(id, userId) })
+    }),
+  )
+
+  /**
+   * The round, pushed as it changes.
+   *
+   * A tick is resolved by the worker on the server's clock, so a client that
+   * polls learns about its own elimination up to a poll late. This sends the
+   * view whenever it changes and nothing when it has not.
+   *
+   * It sends the same view the GET returns — one player's own state and the
+   * counts — never anyone else's pending choice, which would make the stream
+   * a way to win the game.
+   *
+   * Authenticated by the Authorization header like every other /v1 route,
+   * which is why the frontend uses a fetch-based SSE client rather than
+   * EventSource. Registered on a deeper path than '/arcade/rounds/:roundId',
+   * so neither shadows the other.
+   */
+  router.get(
+    '/arcade/rounds/:roundId/stream',
+    asyncHandler(async (req, res) => {
+      const id = z.string().uuid().parse(req.params.roundId)
+      const userId = requireIdentity(req).userId
+
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache, no-transform',
+        connection: 'keep-alive',
+        'x-accel-buffering': 'no',
+      })
+      res.write('retry: 2000\n\n')
+
+      let closed = false
+      req.on('close', () => {
+        closed = true
+      })
+
+      const heartbeat = setInterval(() => {
+        if (!closed) res.write(':hb\n\n')
+      }, STREAM_HEARTBEAT_MS)
+
+      let previous = ''
+      try {
+        while (!closed) {
+          const view = await rounds.view(id, userId)
+          const encoded = JSON.stringify(view)
+          // Only write on a change. A tick is seconds long and the view is
+          // identical between them; resending it would be a heartbeat with
+          // extra steps.
+          if (encoded !== previous) {
+            previous = encoded
+            res.write(`event: round\ndata: ${encoded}\n\n`)
+          }
+          // A settled round has nothing further to say.
+          if (view.round.status === 'settled' || view.round.status === 'aborted') break
+          await new Promise((resolve) => setTimeout(resolve, STREAM_POLL_MS))
+        }
+      } finally {
+        clearInterval(heartbeat)
+        res.end()
+      }
     }),
   )
 

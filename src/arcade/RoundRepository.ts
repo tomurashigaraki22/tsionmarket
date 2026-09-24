@@ -4,6 +4,7 @@ import { withTransaction } from '../db/transaction.js'
 import { fromMysqlDateTime } from '../db/datetime.js'
 import { AppError } from '../utils/errors.js'
 import { resolveTick, type Move } from './lastMan.js'
+import { StakeRepository, type StakeContext } from './StakeRepository.js'
 
 export type RoundStatus = 'open' | 'running' | 'settled' | 'aborted'
 
@@ -18,14 +19,33 @@ export type Round = {
   minPlayers: number
   maxPlayers: number
   winnerUserId: string | null
+  entryAmount: string
+  entryAsset: string | null
+  entryNetworkId: string | null
+  rakeBps: number
 }
 
 const ROUND_COLUMNS = `id, game_id AS gameId, status, current_tick AS currentTick,
   tick_seconds AS tickSeconds, tick_deadline_at AS tickDeadlineAt,
   join_closes_at AS joinClosesAt, min_players AS minPlayers,
-  max_players AS maxPlayers, winner_user_id AS winnerUserId`
+  max_players AS maxPlayers, winner_user_id AS winnerUserId,
+  CAST(entry_amount AS CHAR) AS entryAmount, entry_asset AS entryAsset,
+  entry_network_id AS entryNetworkId, rake_bps AS rakeBps`
+
+/** A round's stake terms, fixed when it opened. */
+function stakeOf(round: Round): StakeContext | null {
+  if (!round.entryAsset || !round.entryNetworkId) return null
+  return {
+    asset: round.entryAsset,
+    networkId: round.entryNetworkId,
+    amount: round.entryAmount,
+    rakeBps: round.rakeBps,
+  }
+}
 
 export class RoundRepository {
+  private readonly stakes = new StakeRepository()
+
   constructor(private readonly pool: Pool) {}
 
   async openRounds(gameId: string): Promise<Array<Round & { players: number }>> {
@@ -108,17 +128,23 @@ export class RoundRepository {
       if (existing[0]) return existing[0] as Round
 
       const id = randomUUID()
+      // Stake terms are copied from the game as it stands now, so changing the
+      // entry or the house rate later cannot alter a round already in play or
+      // one somebody has already joined.
       await connection.execute(
         `INSERT INTO arcade_rounds
-          (id, game_id, status, min_players, max_players, tick_seconds, join_closes_at)
-         VALUES (?, ?, 'open', ?, ?, ?, DATE_ADD(NOW(6), INTERVAL ? SECOND))`,
+          (id, game_id, status, min_players, max_players, tick_seconds, join_closes_at,
+           entry_amount, entry_asset, entry_network_id, rake_bps)
+         SELECT ?, id, 'open', ?, ?, ?, DATE_ADD(NOW(6), INTERVAL ? SECOND),
+           entry_amount, stake_asset, stake_network_id, rake_bps
+         FROM arcade_games WHERE id = ?`,
         [
           id,
-          input.gameId,
           input.minPlayers,
           input.maxPlayers,
           input.tickSeconds,
           input.joinWindowSeconds,
+          input.gameId,
         ],
       )
       const [created] = await connection.execute<RowDataPacket[]>(
@@ -151,10 +177,24 @@ export class RoundRepository {
 
       // INSERT IGNORE against the composite key: joining twice is a no-op,
       // not a second seat.
-      await connection.execute(
+      const [inserted] = await connection.execute(
         'INSERT IGNORE INTO arcade_entries (round_id, user_id) VALUES (?, ?)',
         [roundId, userId],
       )
+
+      // The stake is taken here, in the same transaction as the seat, and only
+      // when the seat was actually new — rejoining must not charge twice. A
+      // player who cannot pay fails at the door rather than after others have
+      // played a round against them.
+      const stake = stakeOf(round)
+      if (stake && (inserted as { affectedRows?: number }).affectedRows)
+        await this.stakes.escrow(connection, {
+          userId,
+          roundId,
+          asset: stake.asset,
+          networkId: stake.networkId,
+          amount: stake.amount,
+        })
     })
   }
 
@@ -269,6 +309,8 @@ export class RoundRepository {
         `UPDATE arcade_entries SET status = 'refunded' WHERE round_id = ?`,
         [round.id],
       )
+      const stake = stakeOf(round)
+      if (stake) await this.stakes.refundAll(connection, round.id, stake)
       return
     }
 
@@ -313,12 +355,14 @@ export class RoundRepository {
     }
 
     // Everyone went silent. Nobody played, so nobody won — the round is
-    // aborted and the survivors of the previous tick get their stake back.
+    // aborted and every stake goes back to whoever put it up.
     if (outcome.survivors.length === 0) {
       await connection.execute(
         `UPDATE arcade_rounds SET status = 'aborted', settled_at = NOW(6) WHERE id = ?`,
         [round.id],
       )
+      const aborted = stakeOf(round)
+      if (aborted) await this.stakes.refundAll(connection, round.id, aborted)
       return
     }
 
@@ -333,6 +377,11 @@ export class RoundRepository {
          WHERE id = ?`,
         [winner, round.id],
       )
+      // Pays in the same transaction that declares the winner: a settled round
+      // with no payout, or a payout with no settled round, are both states
+      // someone would have to reconcile by hand.
+      const won = stakeOf(round)
+      if (won) await this.stakes.payOut(connection, round.id, winner, won)
       return
     }
 
