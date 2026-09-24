@@ -13,15 +13,18 @@ export class RpcManager {
     const source = this.env as unknown as Record<string, unknown>
     return [
       ...new Set(
-        network.rpcKeys.flatMap((key) => {
-          const value = source[String(key)]
-          return typeof value === 'string'
-            ? value
-                .split(',')
-                .map((item) => item.trim())
-                .filter(Boolean)
-            : []
-        }),
+        [
+          ...(network.defaultRpcUrls ?? []),
+          ...network.rpcKeys.flatMap((key) => {
+            const value = source[String(key)]
+            return typeof value === 'string'
+              ? value
+                  .split(',')
+                  .map((item) => item.trim())
+                  .filter(Boolean)
+              : []
+          }),
+        ],
       ),
     ]
   }

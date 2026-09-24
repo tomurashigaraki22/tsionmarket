@@ -39,4 +39,10 @@ describe('network and RPC policy', () => {
     const network = NETWORKS.find((candidate) => candidate.networkId === 'solana-devnet')!
     expect(new RpcManager(environment).urls(network)).toEqual(['https://api.devnet.solana.com'])
   })
+
+  it('uses the public Intertrain RPC when no environment RPC is configured', () => {
+    const environment = parseEnvironment({ ...database, NETWORK_MODE: 'mainnet' })
+    const network = NETWORKS.find((candidate) => candidate.networkId === 'intertrain-mainnet')!
+    expect(new RpcManager(environment).urls(network)).toEqual(['https://rpc.intertrain.online/rpc'])
+  })
 })

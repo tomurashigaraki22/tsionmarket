@@ -10,6 +10,7 @@ export type Network = {
   nativeSymbol: string
   nativeDecimals: number
   rpcKeys: (keyof Environment)[]
+  defaultRpcUrls?: readonly string[]
   explorer: { name: string; txTemplate: string; addressTemplate: string }
 }
 
@@ -114,6 +115,7 @@ export const NETWORKS: Network[] = [
     nativeSymbol: 'WSK',
     nativeDecimals: 6,
     rpcKeys: ['INTERTRAIN_MAINNET_RPC_URLS', 'INTERTRAIN_MAINNET_RPC_URL'],
+    defaultRpcUrls: ['https://rpc.intertrain.online/rpc'],
     explorer: {
       name: 'Intertrain Explorer',
       txTemplate: 'https://explorer.intertrain.online/tx/{hash}',
