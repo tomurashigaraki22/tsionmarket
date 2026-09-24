@@ -28,6 +28,9 @@ import { metricsHandler, metricsMiddleware } from './observability/metrics.js'
 import type { ValuationService } from './portfolio/ValuationService.js'
 import { phase12Router } from './api/routes/phase12.js'
 import type { OwnershipService } from './portfolio/OwnershipService.js'
+import type { ProfileRepository } from './social/ProfileRepository.js'
+import type { FloorService } from './social/FloorService.js'
+import { socialRouter } from './api/routes/social.js'
 
 export type AppDependencies = {
   environment: Environment
@@ -42,6 +45,8 @@ export type AppDependencies = {
   transactionRepository?: TransactionRepository
   valuationService?: ValuationService
   ownershipService?: OwnershipService
+  profileRepository?: ProfileRepository
+  floorService?: FloorService
 }
 
 export function createApp({
@@ -57,6 +62,8 @@ export function createApp({
   transactionRepository,
   valuationService,
   ownershipService,
+  profileRepository,
+  floorService,
 }: AppDependencies): Express {
   const app = express()
   app.disable('x-powered-by')
@@ -122,6 +129,8 @@ export function createApp({
       app.use('/v1', transactionsRouter(transactionService, transactionRepository))
     if (valuationService && transactionRepository)
       app.use('/v1', phase12Router(valuationService, transactionRepository))
+    if (profileRepository && floorService)
+      app.use('/v1', socialRouter(profileRepository, floorService))
   }
   app.use(notFound)
   app.use(errorHandler)
