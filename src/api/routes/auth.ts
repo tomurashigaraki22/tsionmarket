@@ -222,6 +222,13 @@ function requestContext(request: Request, environment: Environment): RequestCont
 
 function setSessionCookies(response: Response, tokens: SessionTokens, environment: Environment): void {
   const secure = environment.NODE_ENV === 'staging' || environment.NODE_ENV === 'production'
+  // Remove pre-fix host-only cookies left by older deployments before writing
+  // the shared-domain versions. Without this migration, browsers can send two
+  // cookies with the same name while their paths/domains differ.
+  if (environment.AUTH_COOKIE_DOMAIN) {
+    response.clearCookie(environment.AUTH_COOKIE_NAME, { path: '/v1/auth' })
+    response.clearCookie(environment.AUTH_CSRF_COOKIE_NAME, { path: '/v1/auth' })
+  }
   const common = {
     secure,
     sameSite: 'strict' as const,
