@@ -130,7 +130,7 @@ export class ChessRepository {
     }
   }
 
-  async invitePreview(token: string) {
+  async invitePreview(token: string, userId: string) {
     const [rows] = await this.pool.execute<MatchRow[]>(
       `SELECT ${MATCH_COLUMNS} FROM chess_matches WHERE invite_token_hash = ?`,
       [tokenHash(token)],
@@ -141,6 +141,7 @@ export class ChessRepository {
     return {
       matchId: row.id,
       status: hasExpired(row) && row.status === 'waiting' ? 'expired' : row.status,
+      isCreator: row.createdBy === userId,
       timeControlSeconds: Number(row.timeControlSeconds),
       stake: null,
       terms: `${Number(row.timeControlSeconds) / 60}-minute clock · no entry fee · no prize or payout`,

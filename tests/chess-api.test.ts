@@ -76,9 +76,10 @@ describe('authenticated Chess API', () => {
   })
 
   it('sends invitation capabilities in the request body, not logged route paths', async () => {
-    const invitePreview = vi.fn(async (_token: string) => ({
+    const invitePreview = vi.fn(async (_token: string, _userId: string) => ({
       matchId: '323e4567-e89b-42d3-a456-426614174000',
       status: 'waiting' as const,
+      isCreator: false,
       timeControlSeconds: 600,
       stake: null,
       terms: '10-minute clock · no entry fee · no prize or payout',
@@ -89,7 +90,8 @@ describe('authenticated Chess API', () => {
       .set('authorization', 'Bearer authenticated-test-token')
       .send({ token: inviteToken })
     expect(response.status).toBe(200)
-    expect(invitePreview).toHaveBeenCalledWith(inviteToken)
+    expect(invitePreview).toHaveBeenCalledWith(inviteToken, identity.userId)
+    expect(response.body.data.isCreator).toBe(false)
     expect(response.request.url).not.toContain(inviteToken)
   })
 

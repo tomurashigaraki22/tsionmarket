@@ -60,9 +60,9 @@ export function chessRouter(chess: ChessRepository) {
   router.post(
     '/arcade/chess/invites/preview',
     asyncHandler(async (req, res) => {
-      requireIdentity(req)
+      const identity = requireIdentity(req)
       const { token } = inviteBodySchema.parse(req.body)
-      res.json({ success: true, data: await chess.invitePreview(token) })
+      res.json({ success: true, data: await chess.invitePreview(token, identity.userId) })
     }),
   )
 
