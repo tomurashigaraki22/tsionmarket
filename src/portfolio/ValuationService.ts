@@ -5,11 +5,19 @@ import { Decimal } from 'decimal.js'
 import { fromMysqlDateTime } from '../db/datetime.js'
 
 // asOf is a string, not a Date: the pool runs with dateStrings: true.
-type Price = { networkId: string; token: string; symbol: string; priceUsd: string; asOf: string }
+type Price = {
+  networkId: string
+  token: string
+  symbol: string
+  priceUsd: string
+  asOf: string
+  provenance?: string
+}
 const nativeToken: Record<string, string> = {
   'ethereum-mainnet': '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
   'arbitrum-one': '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
   'solana-mainnet-beta': 'So11111111111111111111111111111111111111112',
+  'intertrain-mainnet': 'native',
 }
 const key = (network: string, token: string) =>
   `${network}:${network.startsWith('solana') ? token : token.toLowerCase()}`
@@ -24,6 +32,34 @@ export class ValuationService {
       byToken = new Map(prices.map((price) => [key(price.networkId, price.token), price])),
       positions: Record<string, unknown>[] = [],
       values: Decimal[] = []
+    const hasIntertrainBalance = snapshot.accounts.some(
+      (account) =>
+        account.networkId === 'intertrain-mainnet' &&
+        account.assets.some((asset) => asset.assetId === 'native'),
+    )
+    const intertrainPrice = hasIntertrainBalance ? await this.balances.intertrainNativeUsdPrice() : null
+    if (intertrainPrice)
+      byToken.set(key('intertrain-mainnet', 'native'), {
+        networkId: 'intertrain-mainnet',
+        token: 'native',
+        symbol: 'WSK',
+        priceUsd: intertrainPrice.priceUsd,
+        asOf: intertrainPrice.observedAt,
+        provenance: intertrainPrice.provenance,
+      })
+    const priceSamples: Price[] = intertrainPrice
+      ? [
+          ...prices,
+          {
+            networkId: 'intertrain-mainnet',
+            token: 'native',
+            symbol: 'WSK',
+            priceUsd: intertrainPrice.priceUsd,
+            asOf: intertrainPrice.observedAt,
+            provenance: intertrainPrice.provenance,
+          },
+        ]
+      : prices
     let unpriced = 0
     for (const account of snapshot.accounts)
       for (const asset of account.assets) {
@@ -56,12 +92,12 @@ export class ValuationService {
           priceUsd: price.priceUsd,
           valueUsd: value.toFixed(8),
           priceAsOf: fromMysqlDateTime(price.asOf).toISOString(),
-          provenance: 'spot_market_registry',
+          provenance: price.provenance ?? 'spot_market_registry',
         })
       }
     const total = values.reduce((sum, value) => sum.add(value), new Decimal(0)).toFixed(8),
-      priceAsOf = prices.length
-        ? new Date(Math.min(...prices.map((price) => fromMysqlDateTime(price.asOf).getTime())))
+      priceAsOf = priceSamples.length
+        ? new Date(Math.min(...priceSamples.map((price) => fromMysqlDateTime(price.asOf).getTime())))
         : null,
       result = {
         currency: 'USD' as const,

@@ -36,6 +36,8 @@ import type { RoundRepository } from './arcade/RoundRepository.js'
 import type { ArcadeLimits } from './arcade/ArcadeLimits.js'
 import type { DepositIntentService } from './arcade/DepositIntentService.js'
 import { arcadeCatalogueRouter, arcadeRoundsRouter } from './api/routes/arcade.js'
+import type { ChessRepository } from './arcade/ChessRepository.js'
+import { chessRouter } from './api/routes/chess.js'
 
 export type AppDependencies = {
   environment: Environment
@@ -56,6 +58,7 @@ export type AppDependencies = {
   roundRepository?: RoundRepository
   arcadeLimits?: ArcadeLimits
   depositIntents?: DepositIntentService
+  chessRepository?: ChessRepository
 }
 
 export function createApp({
@@ -77,6 +80,7 @@ export function createApp({
   roundRepository,
   arcadeLimits,
   depositIntents,
+  chessRepository,
 }: AppDependencies): Express {
   const app = express()
   app.disable('x-powered-by')
@@ -123,11 +127,7 @@ export function createApp({
   if (marketRepository)
     app.use(
       '/v1',
-      marketsRouter(
-        marketRepository,
-        environment.MARKET_STALE_AFTER_SECONDS,
-        new ChartService(environment),
-      ),
+      marketsRouter(marketRepository, environment.MARKET_STALE_AFTER_SECONDS, new ChartService(environment)),
     )
   if (arcadeRepository) app.use('/v1', arcadeCatalogueRouter(arcadeRepository))
   if (authService) {
@@ -143,9 +143,10 @@ export function createApp({
       app.use('/v1', transactionsRouter(transactionService, transactionRepository))
     if (valuationService && transactionRepository)
       app.use('/v1', phase12Router(valuationService, transactionRepository))
-    if (roundRepository && arcadeLimits && depositIntents) app.use('/v1', arcadeRoundsRouter(roundRepository, arcadeLimits, depositIntents))
-    if (profileRepository && floorService)
-      app.use('/v1', socialRouter(profileRepository, floorService))
+    if (roundRepository && arcadeLimits && depositIntents)
+      app.use('/v1', arcadeRoundsRouter(roundRepository, arcadeLimits, depositIntents))
+    if (chessRepository) app.use('/v1', chessRouter(chessRepository))
+    if (profileRepository && floorService) app.use('/v1', socialRouter(profileRepository, floorService))
   }
   app.use(notFound)
   app.use(errorHandler)

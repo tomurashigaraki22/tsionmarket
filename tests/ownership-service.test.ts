@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+import { bech32m } from '@scure/base'
 import bs58 from 'bs58'
 import nacl from 'tweetnacl'
 import { describe, expect, it, vi } from 'vitest'
@@ -72,5 +74,32 @@ describe('wallet ownership service', () => {
         idempotencyKey: 'registration-three',
       }),
     ).rejects.toThrow('invalid proof')
+  })
+
+  it('verifies Intertrain MNA ownership from the domain-separated Ed25519 public key', async () => {
+    const { service, repository } = serviceHarness()
+    const keypair = nacl.sign.keyPair()
+    const digest = createHash('sha256')
+      .update(Buffer.concat([Buffer.from('MNA/address/v1'), Buffer.from(keypair.publicKey)]))
+      .digest()
+    const addressPayload = Uint8Array.from([1, ...digest.subarray(0, 20)])
+    const address = bech32m.encodeFromBytes('mna', addressPayload)
+    const challenge = await service.challenge('user-c', 'intertrain-mainnet', address)
+    expect(challenge.signatureScheme).toBe('intertrain-ed25519-v1')
+    const signature = Buffer.from(
+      nacl.sign.detached(new TextEncoder().encode(challenge.statement), keypair.secretKey),
+    ).toString('hex')
+
+    await expect(
+      service.register('user-c', {
+        challengeId: challenge.challengeId,
+        networkId: challenge.networkId,
+        address,
+        signature,
+        publicKey: Buffer.from(keypair.publicKey).toString('hex'),
+        idempotencyKey: 'registration-intertrain',
+      }),
+    ).resolves.toEqual({ id: 'account-id', existing: false })
+    expect(repository.register).toHaveBeenCalledOnce()
   })
 })

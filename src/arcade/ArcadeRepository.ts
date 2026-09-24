@@ -9,6 +9,8 @@ export type ArcadeGame = {
   coverUrl: string | null
   stakeAsset: string | null
   stakeNetworkId: string | null
+  entryAmount: string
+  rakeBps: number
 }
 
 export class ArcadeRepository {
@@ -28,7 +30,8 @@ export class ArcadeRepository {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT id, name, tagline, category, status,
         cover_url AS coverUrl, stake_asset AS stakeAsset,
-        stake_network_id AS stakeNetworkId
+        stake_network_id AS stakeNetworkId,
+        CAST(entry_amount AS CHAR) AS entryAmount, rake_bps AS rakeBps
        FROM arcade_games
        WHERE status <> 'disabled'
        ORDER BY sort_order ASC, id ASC`,

@@ -6,7 +6,7 @@ export type Account = {
   id: string
   networkId: string
   address: string
-  family: 'evm' | 'solana'
+  family: 'evm' | 'solana' | 'intertrain'
   ownershipStatus: 'unverified' | 'verified'
 }
 export class PortfolioRepository {
@@ -47,9 +47,9 @@ export class PortfolioRepository {
         capabilities: {
           enabled: true,
           balanceReads: stored.balance === true,
-          quotes: true,
-          intents: true,
-          submission: true,
+          quotes: stored.quotes !== false,
+          intents: stored.intents !== false,
+          submission: stored.submission !== false,
           sponsorship: false,
         },
         explorer: configured?.explorer ?? null,

@@ -4,6 +4,11 @@ import { formatUnits, isAddress, parseAbi } from 'viem'
 import type { Environment } from '../config/env.js'
 import { AppError } from '../utils/errors.js'
 import { BALANCE_TOKENS, NETWORKS } from './networks.js'
+import {
+  isExpectedIntertrainChain,
+  isIntertrainReservePriceable,
+  parseIntertrainNativeBalance,
+} from './intertrain.js'
 import type { Account, PortfolioRepository } from './PortfolioRepository.js'
 import type { RpcManager } from './RpcManager.js'
 
@@ -45,6 +50,21 @@ export class BalanceService {
     if (!account) throw new AppError('ACCOUNT_NOT_FOUND', 'Verified account not found', 404)
     const network = NETWORKS.find((item) => item.networkId === account.networkId)
     if (!network) throw new AppError('NETWORK_UNSUPPORTED', 'Network is not supported', 400)
+    if (network.family === 'intertrain') {
+      if (token !== 'native')
+        throw new AppError('TOKEN_NOT_LISTED', 'Only native WSK is supported on Intertrain', 400)
+      const snapshot = await this.portfolio(userId)
+      const result = snapshot.accounts.find((item) => item.accountId === accountId)
+      if (result?.state !== 'ready')
+        throw new AppError(
+          'BALANCE_UNAVAILABLE',
+          result?.error?.message ?? 'Balance provider unavailable',
+          503,
+        )
+      const native = result.assets.find((asset) => asset.assetId === 'native')
+      if (!native) throw new AppError('BALANCE_UNAVAILABLE', 'Native WSK balance was not returned', 503)
+      return native
+    }
     const known = [
       ...(await this.repo.marketTokens(account.networkId)),
       ...(BALANCE_TOKENS[account.networkId] ?? []),
@@ -115,6 +135,27 @@ export class BalanceService {
     this.inflight.set(userId, job)
     return job
   }
+  async intertrainNativeUsdPrice(): Promise<{
+    priceUsd: string
+    observedAt: string
+    provenance: string
+  } | null> {
+    const network = NETWORKS.find((item) => item.networkId === 'intertrain-mainnet')
+    if (!network) return null
+    try {
+      const chainInfo = await this.rpc.intertrainRequest(network, 'chain_info')
+      if (!isExpectedIntertrainChain(chainInfo)) return null
+      const reserve = await this.rpc.intertrainRequest(network, 'mna_reserve_status')
+      if (!isIntertrainReservePriceable(reserve)) return null
+      return {
+        priceUsd: '1.00000000',
+        observedAt: new Date().toISOString(),
+        provenance: 'intertrain_mna_reserve_status',
+      }
+    } catch {
+      return null
+    }
+  }
   private async load(userId: string): Promise<PortfolioSnapshot> {
     const accounts = (await this.repo.listAccounts(userId)).filter(
         (account) => account.ownershipStatus === 'verified',
@@ -168,6 +209,51 @@ export class BalanceService {
         error: { code: 'NETWORK_UNSUPPORTED', message: 'Network is not supported' },
       }
     try {
+      if (network.family === 'intertrain') {
+        const chainInfo = await this.rpc.intertrainRequest(network, 'chain_info')
+        if (!isExpectedIntertrainChain(chainInfo))
+          throw new AppError(
+            'INTERTRAIN_NETWORK_MISMATCH',
+            'RPC endpoint is not the expected Intertrain mainnet WSK chain',
+            503,
+          )
+        const response = await this.rpc.intertrainRequest(network, 'account_get', {
+          address: account.address,
+        })
+        const raw = parseIntertrainNativeBalance(response)
+        if (raw === null)
+          throw new AppError(
+            'INTERTRAIN_RPC_RESPONSE_INVALID',
+            'Intertrain returned an invalid native balance',
+            503,
+          )
+        const data =
+          typeof response === 'object' && response !== null ? (response as Record<string, unknown>) : null
+        if (typeof data?.address === 'string' && data.address.toLowerCase() !== account.address.toLowerCase())
+          throw new AppError(
+            'INTERTRAIN_RPC_ADDRESS_MISMATCH',
+            'Intertrain returned a balance for a different address',
+            503,
+          )
+        return {
+          accountId: account.id,
+          networkId: account.networkId,
+          address: account.address,
+          assets: [
+            {
+              assetId: 'native',
+              symbol: 'WSK',
+              decimals: 6,
+              raw,
+              formatted: formatUnits(BigInt(raw), 6),
+              supported: true,
+            },
+          ],
+          state: 'ready',
+          observedAt: new Date().toISOString(),
+          providerStatus: 'fresh',
+        }
+      }
       if (network.family === 'evm') {
         if (!isAddress(account.address)) throw new AppError('INVALID_ADDRESS', 'Invalid EVM address', 400)
         const client = this.rpc.evmClient(network),

@@ -90,6 +90,8 @@ export const EnvironmentSchema = z
     ARBITRUM_FALLBACK_RPC_URL: z.string().optional(),
     SOLANA_MAINNET_RPC_URLS: z.string().optional(),
     SOLANA_MAINNET_RPC_URL: z.string().optional(),
+    INTERTRAIN_MAINNET_RPC_URLS: z.string().optional(),
+    INTERTRAIN_MAINNET_RPC_URL: z.string().optional(),
     RPC_TIMEOUT_MS: z.coerce.number().int().min(500).max(30_000).default(8_000),
     RPC_MAX_RETRIES: z.coerce.number().int().min(0).max(3).default(1),
     RPC_PROVIDER_COOLDOWN_MS: z.coerce.number().int().min(1000).default(30_000),

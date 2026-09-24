@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { bech32m } from '@scure/base'
 import bs58 from 'bs58'
 import nacl from 'tweetnacl'
 import { getAddress, isAddress, recoverMessageAddress, type Hex } from 'viem'
@@ -28,7 +29,12 @@ export class OwnershipService {
     const issuedAt = new Date()
     const expiresAt = new Date(issuedAt.getTime() + CHALLENGE_TTL_MS)
     const nonce = randomBytes(24).toString('base64url')
-    const signatureScheme = network.family === 'evm' ? 'eip191-v1' : 'ed25519-v1'
+    const signatureScheme =
+      network.family === 'evm'
+        ? 'eip191-v1'
+        : network.family === 'intertrain'
+          ? 'intertrain-ed25519-v1'
+          : 'ed25519-v1'
     const statement = [
       'TsionMarket wallet ownership',
       `User: ${userId}`,
@@ -86,11 +92,17 @@ export class OwnershipService {
   }
 }
 
-export function normalizeAddress(family: 'evm' | 'solana', address: string): string {
+export function normalizeAddress(family: 'evm' | 'solana' | 'intertrain', address: string): string {
   try {
     if (family === 'evm') {
       if (!isAddress(address)) throw new Error('invalid')
       return getAddress(address)
+    }
+    if (family === 'intertrain') {
+      const decoded = bech32m.decodeToBytes(address.trim())
+      if (decoded.prefix !== 'mna' || decoded.bytes.length !== 21 || decoded.bytes[0] !== 1)
+        throw new Error('invalid')
+      return bech32m.encodeFromBytes('mna', decoded.bytes)
     }
     return bs58.encode(bs58.decode(address))
   } catch {
@@ -99,7 +111,7 @@ export function normalizeAddress(family: 'evm' | 'solana', address: string): str
 }
 
 async function verifyOwnership(
-  family: 'evm' | 'solana',
+  family: 'evm' | 'solana' | 'intertrain',
   challenge: OwnershipChallenge,
   proof: OwnershipProof,
 ): Promise<boolean> {
@@ -111,6 +123,21 @@ async function verifyOwnership(
       })
       return getAddress(recovered) === challenge.address
     }
+    if (family === 'intertrain') {
+      if (!proof.publicKey) return false
+      const publicKey = hexBytes(proof.publicKey)
+      const signature = hexBytes(proof.signature)
+      if (!publicKey || publicKey.length !== 32 || !signature || signature.length !== 64) return false
+      const digest = createHash('sha256')
+        .update(Buffer.concat([Buffer.from('MNA/address/v1'), Buffer.from(publicKey)]))
+        .digest()
+      const addressBytes = Buffer.concat([Buffer.from([1]), digest.subarray(0, 20)])
+      const derivedAddress = bech32m.encodeFromBytes('mna', addressBytes)
+      return (
+        derivedAddress === challenge.address &&
+        nacl.sign.detached.verify(new TextEncoder().encode(challenge.statement), signature, publicKey)
+      )
+    }
     if (!proof.publicKey || normalizeAddress('solana', proof.publicKey) !== challenge.address) return false
     return nacl.sign.detached.verify(
       new TextEncoder().encode(challenge.statement),
@@ -120,4 +147,10 @@ async function verifyOwnership(
   } catch {
     return false
   }
+}
+
+function hexBytes(value: string): Uint8Array | null {
+  const normalized = value.replace(/^0x/i, '')
+  if (!/^(?:[0-9a-f]{2})+$/i.test(normalized)) return null
+  return Uint8Array.from(normalized.match(/.{2}/g)!.map((byte) => Number.parseInt(byte, 16)))
 }

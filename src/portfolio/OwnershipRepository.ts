@@ -11,7 +11,7 @@ export type OwnershipChallenge = {
   address: string
   nonce: string
   statement: string
-  signatureScheme: 'eip191-v1' | 'ed25519-v1'
+  signatureScheme: 'eip191-v1' | 'ed25519-v1' | 'intertrain-ed25519-v1'
   issuedAt: string
   expiresAt: string
   consumedAt: string | null

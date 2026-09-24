@@ -6,6 +6,7 @@ import { requireIdentity } from '../../auth/middleware.js'
 import type { PortfolioRepository } from '../../portfolio/PortfolioRepository.js'
 import type { BalanceService } from '../../portfolio/BalanceService.js'
 import type { OwnershipService } from '../../portfolio/OwnershipService.js'
+import { intertrainUsdcBridgeStatus } from '../../portfolio/intertrainBridgeStatus.js'
 
 export const ownershipChallengeInputSchema = z
   .object({
@@ -47,6 +48,10 @@ export function portfolioRouter(
   router.get(
     '/networks',
     asyncHandler(async (_req, res) => res.json({ success: true, data: await repo.listNetworks() })),
+  )
+  router.get(
+    '/bridge/intertrain/usdc/status',
+    (_req, res) => res.json({ success: true, data: intertrainUsdcBridgeStatus() }),
   )
   router.get(
     '/wallets/me/accounts',

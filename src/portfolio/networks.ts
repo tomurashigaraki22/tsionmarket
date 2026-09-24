@@ -2,7 +2,7 @@ import type { Environment } from '../config/env.js'
 
 export type Network = {
   networkId: string
-  family: 'evm' | 'solana'
+  family: 'evm' | 'solana' | 'intertrain'
   name: string
   environment: 'mainnet' | 'testnet' | 'devnet'
   chainId?: number
@@ -102,6 +102,22 @@ export const NETWORKS: Network[] = [
       name: 'Solana Explorer',
       txTemplate: 'https://explorer.solana.com/tx/{hash}',
       addressTemplate: 'https://explorer.solana.com/address/{address}',
+    },
+  },
+  {
+    networkId: 'intertrain-mainnet',
+    family: 'intertrain',
+    name: 'Intertrain',
+    environment: 'mainnet',
+    chainId: 4683,
+    cluster: 'intertrain-1',
+    nativeSymbol: 'WSK',
+    nativeDecimals: 6,
+    rpcKeys: ['INTERTRAIN_MAINNET_RPC_URLS', 'INTERTRAIN_MAINNET_RPC_URL'],
+    explorer: {
+      name: 'Intertrain Explorer',
+      txTemplate: 'https://explorer.intertrain.online/tx/{hash}',
+      addressTemplate: 'https://explorer.intertrain.online/address/{address}',
     },
   },
 ]
