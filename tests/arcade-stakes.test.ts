@@ -7,6 +7,7 @@ import {
   rakeOf,
   subtract,
 } from '../src/arcade/StakeRepository.js'
+import { limitsSchema } from '../src/api/routes/arcade.js'
 
 /**
  * These are the money arithmetic, tested on their own because every one of
@@ -97,5 +98,26 @@ describe('pot invariant', () => {
       const returned = multiply(stake, players)
       expect(subtract(pot, returned)).toBe('0')
     }
+  })
+})
+
+describe('responsible play input', () => {
+  it('takes a loss limit as a decimal string, never a number', () => {
+    // Parsed as a number this would already have lost precision before the
+    // limit was ever compared against a balance.
+    expect(limitsSchema.parse({ dailyLossLimit: '100.000000000000000001' }).dailyLossLimit).toBe(
+      '100.000000000000000001',
+    )
+    expect(() => limitsSchema.parse({ dailyLossLimit: 100 })).toThrow()
+    expect(() => limitsSchema.parse({ dailyLossLimit: '-5' })).toThrow()
+  })
+
+  it('accepts clearing a limit but not an unknown field', () => {
+    expect(limitsSchema.parse({ dailyEntryLimit: null }).dailyEntryLimit).toBeNull()
+    expect(() => limitsSchema.parse({ unlimited: true })).toThrow()
+  })
+
+  it('requires a real timestamp for a self-exclusion', () => {
+    expect(() => limitsSchema.parse({ selfExcludedUntil: 'tomorrow' })).toThrow()
   })
 })

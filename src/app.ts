@@ -33,6 +33,7 @@ import type { FloorService } from './social/FloorService.js'
 import { socialRouter } from './api/routes/social.js'
 import type { ArcadeRepository } from './arcade/ArcadeRepository.js'
 import type { RoundRepository } from './arcade/RoundRepository.js'
+import type { ArcadeLimits } from './arcade/ArcadeLimits.js'
 import { arcadeCatalogueRouter, arcadeRoundsRouter } from './api/routes/arcade.js'
 
 export type AppDependencies = {
@@ -52,6 +53,7 @@ export type AppDependencies = {
   floorService?: FloorService
   arcadeRepository?: ArcadeRepository
   roundRepository?: RoundRepository
+  arcadeLimits?: ArcadeLimits
 }
 
 export function createApp({
@@ -71,6 +73,7 @@ export function createApp({
   floorService,
   arcadeRepository,
   roundRepository,
+  arcadeLimits,
 }: AppDependencies): Express {
   const app = express()
   app.disable('x-powered-by')
@@ -137,7 +140,7 @@ export function createApp({
       app.use('/v1', transactionsRouter(transactionService, transactionRepository))
     if (valuationService && transactionRepository)
       app.use('/v1', phase12Router(valuationService, transactionRepository))
-    if (roundRepository) app.use('/v1', arcadeRoundsRouter(roundRepository))
+    if (roundRepository && arcadeLimits) app.use('/v1', arcadeRoundsRouter(roundRepository, arcadeLimits))
     if (profileRepository && floorService)
       app.use('/v1', socialRouter(profileRepository, floorService))
   }

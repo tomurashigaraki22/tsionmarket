@@ -5,6 +5,7 @@ import { asyncHandler } from '../../utils/asyncHandler.js'
 import { requireIdentity } from '../../auth/middleware.js'
 import type { ArcadeRepository } from '../../arcade/ArcadeRepository.js'
 import type { RoundRepository } from '../../arcade/RoundRepository.js'
+import type { ArcadeLimits } from '../../arcade/ArcadeLimits.js'
 
 export const commitSchema = z.object({ choice: z.union([z.literal(0), z.literal(1)]) }).strict()
 
@@ -32,7 +33,20 @@ export function arcadeCatalogueRouter(repo: ArcadeRepository) {
   return router
 }
 
-export function arcadeRoundsRouter(rounds: RoundRepository) {
+export const limitsSchema = z
+  .object({
+    dailyEntryLimit: z.coerce.number().int().min(1).max(500).nullable().optional(),
+    // A decimal string, never a number: this is compared against money.
+    dailyLossLimit: z
+      .string()
+      .regex(/^\d+(\.\d{1,18})?$/)
+      .nullable()
+      .optional(),
+    selfExcludedUntil: z.string().datetime().nullable().optional(),
+  })
+  .strict()
+
+export function arcadeRoundsRouter(rounds: RoundRepository, limits: ArcadeLimits) {
   const router = Router()
   // A commit is one small write per player per tick, so the limit only exists
   // to stop a loop hammering the endpoint between deadlines.
@@ -148,6 +162,39 @@ export function arcadeRoundsRouter(rounds: RoundRepository) {
         clearInterval(heartbeat)
         res.end()
       }
+    }),
+  )
+
+  // Published once a round is over so anyone can replay it through the same
+  // pure resolver and check the winner follows from what was played.
+  router.get(
+    '/arcade/rounds/:roundId/verify',
+    asyncHandler(async (req, res) => {
+      const id = z.string().uuid().parse(req.params.roundId)
+      requireIdentity(req)
+      res.json({ success: true, data: await rounds.verification(id) })
+    }),
+  )
+
+  router.get(
+    '/arcade/limits',
+    asyncHandler(async (req, res) =>
+      res.json({ success: true, data: await limits.forUser(requireIdentity(req).userId) }),
+    ),
+  )
+
+  router.put(
+    '/arcade/limits',
+    asyncHandler(async (req, res) => {
+      const input = limitsSchema.parse(req.body)
+      res.json({
+        success: true,
+        data: await limits.save(requireIdentity(req).userId, {
+          dailyEntryLimit: input.dailyEntryLimit ?? null,
+          dailyLossLimit: input.dailyLossLimit ?? null,
+          selfExcludedUntil: input.selfExcludedUntil ?? null,
+        }),
+      })
     }),
   )
 

@@ -5,6 +5,7 @@ import { fromMysqlDateTime } from '../db/datetime.js'
 import { AppError } from '../utils/errors.js'
 import { resolveTick, type Move } from './lastMan.js'
 import { StakeRepository, type StakeContext } from './StakeRepository.js'
+import { ArcadeLimits } from './ArcadeLimits.js'
 
 export type RoundStatus = 'open' | 'running' | 'settled' | 'aborted'
 
@@ -45,8 +46,11 @@ function stakeOf(round: Round): StakeContext | null {
 
 export class RoundRepository {
   private readonly stakes = new StakeRepository()
+  private readonly limits: ArcadeLimits
 
-  constructor(private readonly pool: Pool) {}
+  constructor(private readonly pool: Pool) {
+    this.limits = new ArcadeLimits(pool)
+  }
 
   async openRounds(gameId: string): Promise<Array<Round & { players: number }>> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
@@ -175,6 +179,15 @@ export class RoundRepository {
       if (Number(counts[0]?.players ?? 0) >= round.maxPlayers)
         throw new AppError('ROUND_FULL', 'That round is full', 409)
 
+      // Account gate and self-set limits, checked inside this transaction so
+      // two joins at once cannot both pass a limit only one of them fits.
+      const terms = stakeOf(round)
+      await this.limits.assertMayJoin(
+        connection,
+        userId,
+        terms ? { asset: terms.asset, amount: terms.amount } : null,
+      )
+
       // INSERT IGNORE against the composite key: joining twice is a no-op,
       // not a second seat.
       const [inserted] = await connection.execute(
@@ -242,6 +255,42 @@ export class RoundRepository {
         throw error
       }
     })
+  }
+
+  /**
+   * Every move in a settled round, so the result can be checked.
+   *
+   * Last Man has no randomness in it — ties repeat rather than being broken by
+   * a coin — so there is no seed to commit and reveal, and publishing one
+   * would be theatre. What can be doubted is whether the declared winner
+   * follows from what people actually played, and that is answerable: the
+   * moves are released once the round is over and `resolveTick` is a pure
+   * function anyone can replay them through.
+   *
+   * Released only after settlement. During play this same data would tell a
+   * player what everyone else had chosen.
+   */
+  async verification(roundId: string) {
+    const round = await this.byId(roundId)
+    if (!round) throw new AppError('ROUND_NOT_FOUND', 'That round no longer exists', 404)
+    if (round.status !== 'settled' && round.status !== 'aborted')
+      throw new AppError(
+        'ROUND_IN_PLAY',
+        'Moves are published once the round is over',
+        409,
+      )
+
+    const [moves] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT tick, user_id AS userId, choice FROM arcade_moves
+       WHERE round_id = ? ORDER BY tick ASC, user_id ASC`,
+      [roundId],
+    )
+    const [entries] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT user_id AS userId, status, eliminated_tick AS eliminatedTick
+       FROM arcade_entries WHERE round_id = ? ORDER BY user_id ASC`,
+      [roundId],
+    )
+    return { round, entries, moves }
   }
 
   /** Rounds the worker needs to act on: join window elapsed, or tick expired. */
