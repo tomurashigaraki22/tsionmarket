@@ -77,6 +77,9 @@ services:
       AUTH_TERMS_VERSION: ${AUTH_TERMS_VERSION:-2026-09-22}
       AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:-tsion_refresh}
       AUTH_CSRF_COOKIE_NAME: ${AUTH_CSRF_COOKIE_NAME:-tsion_csrf}
+      # Share the session cookies across tsionmarket.com and api.tsionmarket.com
+      # so a frontend reload can read the CSRF token and refresh the session.
+      AUTH_COOKIE_DOMAIN: ${AUTH_COOKIE_DOMAIN:-.tsionmarket.com}
       # Production refuses console delivery. Default is Hostinger SMTP.
       AUTH_EMAIL_DELIVERY_MODE: ${AUTH_EMAIL_DELIVERY_MODE:-smtp}
       AUTH_SMTP_HOST: ${AUTH_SMTP_HOST:-smtp.hostinger.com}

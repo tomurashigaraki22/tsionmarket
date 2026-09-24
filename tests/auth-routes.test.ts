@@ -13,6 +13,7 @@ const environment = parseEnvironment({
   MYSQL_MIGRATION_USER: 'migration',
   MYSQL_MIGRATION_PASSWORD: 'password',
   CORS_ALLOWED_ORIGINS: 'https://app.test',
+  AUTH_COOKIE_DOMAIN: '.app.test',
 })
 
 function appWithAuth(overrides: Record<string, unknown> = {}) {
@@ -88,6 +89,22 @@ describe('authentication routes', () => {
     expect(cookies.some((cookie) => cookie.startsWith('tsion_csrf=') && !cookie.includes('HttpOnly'))).toBe(
       true,
     )
+    expect(
+      cookies.some(
+        (cookie) =>
+          cookie.startsWith('tsion_refresh=') &&
+          cookie.includes('Domain=.app.test') &&
+          cookie.includes('Path=/v1/auth'),
+      ),
+    ).toBe(true)
+    expect(
+      cookies.some(
+        (cookie) =>
+          cookie.startsWith('tsion_csrf=') &&
+          cookie.includes('Domain=.app.test') &&
+          cookie.includes('Path=/'),
+      ),
+    ).toBe(true)
     expect(response.body.data).not.toHaveProperty('refreshToken')
   })
 

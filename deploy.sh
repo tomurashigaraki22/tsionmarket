@@ -57,6 +57,9 @@ API_LOCAL_PORT=3456
 # Browser origins allowed to call this API (comma separated, no trailing slash).
 CORS_ALLOWED_ORIGINS=https://tsionmarket.com,https://www.tsionmarket.com
 
+# Share cookies with the frontend subdomain so a page reload can refresh the session.
+AUTH_COOKIE_DOMAIN=.tsionmarket.com
+
 # --- generated secrets, no need to edit ---
 MYSQL_ROOT_PASSWORD=$(secret)
 MYSQL_DATABASE=tsionmarket

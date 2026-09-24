@@ -230,13 +230,26 @@ function setSessionCookies(response: Response, tokens: SessionTokens, environmen
     maxAge: environment.AUTH_REFRESH_IDLE_TTL_SECONDS * 1000,
   }
   response.cookie(environment.AUTH_COOKIE_NAME, tokens.refreshToken, { ...common, httpOnly: true })
-  response.cookie(environment.AUTH_CSRF_COOKIE_NAME, tokens.csrfToken, { ...common, httpOnly: false })
+  // The frontend reads this double-submit token from document.cookie before
+  // sending it in x-csrf-token. It must be visible at the app route as well
+  // as sent to /v1/auth/refresh. The refresh token stays path-restricted and
+  // HttpOnly.
+  response.cookie(environment.AUTH_CSRF_COOKIE_NAME, tokens.csrfToken, {
+    ...common,
+    path: '/',
+    httpOnly: false,
+  })
 }
 
 function clearSessionCookies(response: Response, environment: Environment): void {
-  const options = { domain: environment.AUTH_COOKIE_DOMAIN, path: '/v1/auth' }
-  response.clearCookie(environment.AUTH_COOKIE_NAME, options)
-  response.clearCookie(environment.AUTH_CSRF_COOKIE_NAME, options)
+  response.clearCookie(environment.AUTH_COOKIE_NAME, {
+    domain: environment.AUTH_COOKIE_DOMAIN,
+    path: '/v1/auth',
+  })
+  response.clearCookie(environment.AUTH_CSRF_COOKIE_NAME, {
+    domain: environment.AUTH_COOKIE_DOMAIN,
+    path: '/',
+  })
 }
 
 function accessResponse(tokens: SessionTokens) {

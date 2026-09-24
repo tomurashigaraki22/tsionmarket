@@ -79,6 +79,7 @@ have no safe fallback:
 | -------------------------- | --------------------------------------------------- |
 | `ACME_EMAIL`               | Let's Encrypt expiry notices                         |
 | `CORS_ALLOWED_ORIGINS`     | Your frontend origin(s), comma separated             |
+| `AUTH_COOKIE_DOMAIN`       | `.tsionmarket.com` for frontend/API session refresh  |
 | `AUTH_SMTP_PASSWORD`       | Hostinger mailbox password                           |
 | `AUTH_EMAIL_LINK_BASE_URL` | Where email links point — your frontend, not the API |
 | `*_RPC_URLS`               | Mainnet RPC endpoints for balances and transactions  |
