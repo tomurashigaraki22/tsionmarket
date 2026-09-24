@@ -106,6 +106,13 @@ export const EnvironmentSchema = z
     // the next source rather than failing, so an unkeyed deployment still
     // draws pool candles from GeckoTerminal, which needs none.
     BIRDEYE_API_KEY: z.string().optional(),
+    // The house address players send USDC to. Read-only here: crediting a
+    // balance needs no key, only a confirmed transfer.
+    ARCADE_DEPOSIT_ADDRESS: z.string().min(32).max(64).optional(),
+    // 0.1% to 1%, per the product decision. Capped in schema so a fat finger
+    // cannot set 50%.
+    ARCADE_DEPOSIT_FEE_BPS: z.coerce.number().int().min(0).max(100).default(10),
+    ARCADE_DEPOSIT_SCAN_INTERVAL_SECONDS: z.coerce.number().int().min(5).max(600).default(20),
     COINGECKO_API_KEY: z.string().optional(),
     LIFI_API_URL: z.string().url().default('https://li.quest/v1'),
     LIFI_API_KEY: z.string().optional(),

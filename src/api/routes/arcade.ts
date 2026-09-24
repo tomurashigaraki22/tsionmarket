@@ -176,6 +176,22 @@ export function arcadeRoundsRouter(rounds: RoundRepository, limits: ArcadeLimits
     }),
   )
 
+  /**
+   * Where to send USDC, what it costs, and what is already credited.
+   *
+   * The fee is returned rather than hardcoded in the client, so the number a
+   * player is shown is the number the server will actually take.
+   */
+  router.get(
+    '/arcade/funding',
+    asyncHandler(async (req, res) =>
+      res.json({
+        success: true,
+        data: await rounds.funding(requireIdentity(req).userId),
+      }),
+    ),
+  )
+
   router.get(
     '/arcade/limits',
     asyncHandler(async (req, res) =>

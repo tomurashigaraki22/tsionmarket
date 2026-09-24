@@ -48,7 +48,11 @@ export class RoundRepository {
   private readonly stakes = new StakeRepository()
   private readonly limits: ArcadeLimits
 
-  constructor(private readonly pool: Pool) {
+  constructor(
+    private readonly pool: Pool,
+    private readonly depositAddress: string | null = null,
+    private readonly depositFeeBps: number = 0,
+  ) {
     this.limits = new ArcadeLimits(pool)
   }
 
@@ -291,6 +295,46 @@ export class RoundRepository {
       [roundId],
     )
     return { round, entries, moves }
+  }
+
+  /**
+   * What a player needs in order to fund a stake: the house address, the
+   * deposit fee, their verified Solana addresses, and what is already credited.
+   *
+   * The verified addresses matter because attribution is by sender — a
+   * transfer from anywhere else lands in the house account unattributed and
+   * has to be sorted out by a human. Showing them makes that visible before
+   * the mistake rather than after.
+   */
+  async funding(userId: string) {
+    const [balances] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT asset, network_id AS networkId, CAST(available AS CHAR) AS available,
+        CAST(escrowed AS CHAR) AS escrowed
+       FROM arcade_balances WHERE user_id = ?`,
+      [userId],
+    )
+    const [addresses] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT address FROM wallet_account_ownership
+       WHERE user_id = ? AND network_id = 'solana-mainnet-beta'`,
+      [userId],
+    )
+    const [recent] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT signature, CAST(gross_amount AS CHAR) AS grossAmount,
+        CAST(fee_amount AS CHAR) AS feeAmount, CAST(net_amount AS CHAR) AS netAmount,
+        status, seen_at AS seenAt
+       FROM arcade_deposits WHERE user_id = ? ORDER BY seen_at DESC LIMIT 10`,
+      [userId],
+    )
+
+    return {
+      depositAddress: this.depositAddress,
+      depositFeeBps: this.depositFeeBps,
+      asset: 'USDC',
+      networkId: 'solana-mainnet-beta',
+      balances,
+      verifiedAddresses: addresses.map((row) => String(row.address)),
+      recentDeposits: recent,
+    }
   }
 
   /** Rounds the worker needs to act on: join window elapsed, or tick expired. */

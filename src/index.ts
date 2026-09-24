@@ -26,6 +26,7 @@ import { ArcadeRepository } from './arcade/ArcadeRepository.js'
 import { RoundRepository } from './arcade/RoundRepository.js'
 import { ArcadeWorker } from './arcade/ArcadeWorker.js'
 import { ArcadeLimits } from './arcade/ArcadeLimits.js'
+import { DepositWatcher } from './arcade/DepositWatcher.js'
 import { ProfileRepository } from './social/ProfileRepository.js'
 import { FloorRepository } from './social/FloorRepository.js'
 import { FloorService } from './social/FloorService.js'
@@ -51,9 +52,14 @@ const transactionService = new TransactionService(transactionRepository, rpcMana
 const reconciliationWorker = new ReconciliationWorker(transactionRepository, rpcManager, environment)
 const valuationService = new ValuationService(pool, balanceService)
 const arcadeRepository = new ArcadeRepository(pool)
-const roundRepository = new RoundRepository(pool)
+const roundRepository = new RoundRepository(
+  pool,
+  environment.ARCADE_DEPOSIT_ADDRESS ?? null,
+  environment.ARCADE_DEPOSIT_FEE_BPS,
+)
 const arcadeWorker = new ArcadeWorker(roundRepository, 2000)
 const arcadeLimits = new ArcadeLimits(pool)
+const depositWatcher = new DepositWatcher(pool, rpcManager, environment)
 const profileRepository = new ProfileRepository(pool)
 const floorService = new FloorService(new FloorRepository(pool), profileRepository, pool)
 await portfolioRepository.applyNetworkMode(environment.NETWORK_MODE)
@@ -83,6 +89,7 @@ server.listen(environment.PORT, environment.HOST, () => {
   marketRegistryWorker.start()
   reconciliationWorker.start()
   arcadeWorker.start()
+  depositWatcher.start()
   logger.info('HTTP server started', { host: environment.HOST, port: environment.PORT })
 })
 
@@ -104,6 +111,7 @@ function shutdown(signal: string): void {
       marketRegistryWorker.stop()
       reconciliationWorker.stop()
       arcadeWorker.stop()
+      depositWatcher.stop()
       await pool.end()
       if (error) throw error
       clearTimeout(forceTimer)
