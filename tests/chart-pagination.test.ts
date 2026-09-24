@@ -59,4 +59,58 @@ describe('chart history', () => {
     expect(requested.some((url) => url.includes('before_timestamp=99'))).toBe(true)
     expect(requested.some((url) => url.includes('birdeye'))).toBe(false)
   })
+
+  it('continues from another ranked pool when the deepest pool is newly created', async () => {
+    const requested: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL) => {
+        const url = String(input)
+        requested.push(url)
+        if (url.includes('/tokens/mint/pools'))
+          return new Response(
+            JSON.stringify({
+              data: [
+                { id: 'solana_deep', attributes: { reserve_in_usd: '1000' } },
+                { id: 'solana_old', attributes: { reserve_in_usd: '900' } },
+              ],
+            }),
+            { status: 200 },
+          )
+        if (url.includes('/pools/old/ohlcv/'))
+          return new Response(
+            JSON.stringify({
+              data: { attributes: { ohlcv_list: [[90, 1, 1, 1, 1, 1]] } },
+            }),
+            { status: 200 },
+          )
+        if (url.includes('/ohlcv/'))
+          return new Response(
+            JSON.stringify({
+              data: {
+                attributes: {
+                  ohlcv_list: url.includes('before_timestamp') ? [] : [[100, 2, 2, 2, 2, 1]],
+                },
+              },
+            }),
+            { status: 200 },
+          )
+        return new Response(JSON.stringify({ data: { attributes: {} } }), {
+          status: 200,
+        })
+      }),
+    )
+    const service = new ChartService({ BIRDEYE_API_KEY: '' } as Environment)
+    const input = {
+      networkId: 'solana-mainnet-beta',
+      token: 'mint',
+      interval: '1h',
+      source: 'geckoterminal' as const,
+    }
+    const first = await service.candles(input)
+    const second = await service.candles({ ...input, before: first.nextCursor! })
+    expect(first.candles.map((bar) => bar.time)).toEqual([100])
+    expect(second.candles.map((bar) => bar.time)).toEqual([90])
+    expect(requested.some((url) => url.includes('/pools/old/ohlcv/'))).toBe(true)
+  })
 })

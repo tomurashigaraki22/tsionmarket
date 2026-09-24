@@ -25,7 +25,6 @@ import {
   normalizeBirdeye,
   normalizeOhlcv,
   num,
-  pickBestPool,
   stats24hFrom,
   type ChartPayload,
   type ChartSource,
@@ -90,7 +89,8 @@ const MAX_CACHE_ENTRIES = 500
 type CacheEntry<T> = { value: T; expires: number }
 
 export class ChartService {
-  private readonly pools = new Map<string, CacheEntry<string | null>>()
+  /** Ranked pools, retained so a newly-created deepest pool cannot truncate history. */
+  private readonly pools = new Map<string, CacheEntry<Array<string>>>()
   private readonly charts = new Map<string, CacheEntry<ChartPayload>>()
   /** One upstream round-trip per key, however many viewers ask at once. */
   private readonly inflight = new Map<string, Promise<ChartPayload>>()
@@ -222,7 +222,13 @@ export class ChartService {
     }
   }
 
-  /** OHLCV from the deepest pool holding this token. */
+  /**
+   * OHLCV from the deepest pool holding this token. If that pool is too new
+   * to answer an older cursor, walk the ranked candidates and continue from a
+   * pool that actually has bars before the cursor. This keeps a fresh pool
+   * from making an established market look like it has only a few hours of
+   * history.
+   */
   private async fromPool(
     networkId: string,
     token: string,
@@ -233,52 +239,62 @@ export class ChartService {
     const timeframe = TIMEFRAME[interval]
     if (!slug || !timeframe) return null
 
-    const pool = await this.findPool(slug, token)
-    if (!pool) return null
+    const pools = await this.findPools(slug, token)
+    for (const pool of pools) {
+      try {
+        const url = new URL(`${GECKO}/networks/${slug}/pools/${pool}/ohlcv/${timeframe.timeframe}`)
+        url.searchParams.set('aggregate', String(timeframe.aggregate))
+        url.searchParams.set('limit', '1000')
+        url.searchParams.set('currency', 'usd')
+        // Price OUR token, not the pool's base. In a TOKEN/SOL pool the base is
+        // the token, but in a USDC/TOKEN pool it is not, and charting the base
+        // blindly would draw the price upside down.
+        url.searchParams.set('token', token)
+        if (before) url.searchParams.set('before_timestamp', String(before - 1))
 
-    const url = new URL(`${GECKO}/networks/${slug}/pools/${pool}/ohlcv/${timeframe.timeframe}`)
-    url.searchParams.set('aggregate', String(timeframe.aggregate))
-    url.searchParams.set('limit', '1000')
-    url.searchParams.set('currency', 'usd')
-    // Price OUR token, not the pool's base. In a TOKEN/SOL pool the base is
-    // the token, but in a USDC/TOKEN pool it is not, and charting the base
-    // blindly would draw the price upside down.
-    url.searchParams.set('token', token)
-    if (before) url.searchParams.set('before_timestamp', String(before - 1))
+        const signal = AbortSignal.timeout(UPSTREAM_TIMEOUT_MS)
+        const [ohlcv, poolDetail] = await Promise.all([
+          fetch(url, { headers: { accept: 'application/json' }, signal }),
+          fetch(`${GECKO}/networks/${slug}/pools/${pool}`, {
+            headers: { accept: 'application/json' },
+            signal,
+          }),
+        ])
+        if (!ohlcv.ok) continue
 
-    const signal = AbortSignal.timeout(UPSTREAM_TIMEOUT_MS)
-    const [ohlcv, poolDetail] = await Promise.all([
-      fetch(url, { headers: { accept: 'application/json' }, signal }),
-      fetch(`${GECKO}/networks/${slug}/pools/${pool}`, {
-        headers: { accept: 'application/json' },
-        signal,
-      }),
-    ])
-    if (!ohlcv.ok) return null
+        const body = (await ohlcv.json()) as {
+          data?: { attributes?: { ohlcv_list?: Array<Array<number | string>> } }
+        }
+        let candles = normalizeOhlcv(body.data?.attributes?.ohlcv_list)
+        // A few upstream responses include the boundary bar even when
+        // before_timestamp is set. Remove it so every page is strictly older.
+        if (before) candles = candles.filter((candle) => candle.time < before)
+        if (candles.length === 0) continue
 
-    const body = (await ohlcv.json()) as {
-      data?: { attributes?: { ohlcv_list?: Array<Array<number | string>> } }
-    }
-    const candles = normalizeOhlcv(body.data?.attributes?.ohlcv_list)
-    if (candles.length === 0) return null
+        // Price and change come from the series, which is priced in our token.
+        // Volume is a property of the pool and reads the same from either side.
+        let volume24h: number | null = null
+        if (poolDetail.ok) {
+          const detail = (await poolDetail.json()) as {
+            data?: { attributes?: { volume_usd?: Record<string, string> } }
+          }
+          volume24h = num(detail.data?.attributes?.volume_usd?.h24)
+        }
 
-    // Price and change come from the series, which is priced in our token.
-    // Volume is a property of the pool and reads the same from either side.
-    let volume24h: number | null = null
-    if (poolDetail.ok) {
-      const detail = (await poolDetail.json()) as {
-        data?: { attributes?: { volume_usd?: Record<string, string> } }
+        return {
+          candles,
+          stats: { ...stats24hFrom(candles), volume24h },
+          source: 'geckoterminal',
+          intervals: ALL_INTERVALS,
+          nextCursor: candles[0]?.time ?? null,
+        }
+      } catch {
+        // One pool timing out must not hide older bars available in the next
+        // ranked pool.
+        continue
       }
-      volume24h = num(detail.data?.attributes?.volume_usd?.h24)
     }
-
-    return {
-      candles,
-      stats: { ...stats24hFrom(candles), volume24h },
-      source: 'geckoterminal',
-      intervals: ALL_INTERVALS,
-      nextCursor: candles[0]?.time ?? null,
-    }
+    return null
   }
 
   /**
@@ -323,7 +339,7 @@ export class ChartService {
     }
   }
 
-  private async findPool(slug: string, token: string): Promise<string | null> {
+  private async findPools(slug: string, token: string): Promise<Array<string>> {
     const key = `${slug}:${token.toLowerCase()}`
     const hit = read(this.pools, key)
     if (hit !== undefined) return hit
@@ -336,15 +352,27 @@ export class ChartService {
       // A rate limit or outage is not proof the token has no pool. Cache only
       // a genuine 404 — caching 429/5xx keeps charts empty long after a
       // transient failure.
-      if (response.status === 404) write(this.pools, key, null, 10 * 60_000)
-      return null
+      if (response.status === 404) write(this.pools, key, [], 10 * 60_000)
+      return []
     }
     const body = (await response.json()) as {
       data?: Array<{ id?: string; attributes?: { address?: string; reserve_in_usd?: string } }>
     }
-    const pool = pickBestPool(body.data)
-    write(this.pools, key, pool, pool ? 60 * 60_000 : 10 * 60_000)
-    return pool
+    const pools = (body.data ?? [])
+      .map((row) => ({
+        address:
+          row.attributes?.address ??
+          String(row.id ?? '')
+            .split('_')
+            .slice(1)
+            .join('_'),
+        liquidity: num(row.attributes?.reserve_in_usd) ?? 0,
+      }))
+      .filter((row) => row.address)
+      .sort((left, right) => right.liquidity - left.liquidity)
+      .map((row) => row.address)
+    write(this.pools, key, pools, pools.length ? 60 * 60_000 : 10 * 60_000)
+    return pools
   }
 }
 

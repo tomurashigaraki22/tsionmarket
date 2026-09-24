@@ -70,6 +70,7 @@ export class QuoteService {
       minimumBuyAmountRaw: quote.toAmountMin,
       sellDecimals,
       buyDecimals,
+      slippageBps: input.slippageBps,
       priceImpactBps: quote.priceImpactBps,
       estimatedFeeRaw: quote.estimatedFeeRaw,
       tool: quote.tool,
