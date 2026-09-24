@@ -106,11 +106,21 @@ export class MarketRegistryWorker {
           const symbol = String(token.symbol ?? '')
             .trim()
             .toUpperCase()
+          // Jupiter's v2 token list carries a 'meme' tag alongside 'verified'.
+          // It is the only provider we route that classifies tokens at all,
+          // which is why memecoins are a Solana/Jupiter category rather than a
+          // cross-chain one.
+          const tags: string[] = Array.isArray(token.tags)
+            ? (token.tags as unknown[]).map((tag) => String(tag).toLowerCase())
+            : []
           const price = numeric(token.usdPrice ?? token.price ?? token.priceUSD),
             liquidity = numeric(token.liquidity ?? token.liquidityUsd)
           return {
             marketId: `${route.venue}:${route.networkId}:${address.toLowerCase()}:${route.quote.toLowerCase()}`,
             venue: route.venue,
+            marketCategory: (route.venue === 'jupiter' && tags.includes('meme')
+              ? 'meme'
+              : 'market') as MarketInput['marketCategory'],
             networkId: route.networkId,
             baseSymbol: symbol,
             quoteSymbol: 'USDC',

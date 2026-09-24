@@ -48,6 +48,7 @@ describe('public API request contracts', () => {
 
   it('coerces and bounds pagination inputs', () => {
     expect(marketQuerySchema.parse({ limit: '25' }).limit).toBe(25)
+    expect(marketQuerySchema.parse({ marketCategory: 'meme' }).marketCategory).toBe('meme')
     expect(transactionHistoryQuerySchema.parse({}).limit).toBe(50)
     expect(valuationHistoryQuerySchema.parse({}).limit).toBe(30)
     expect(marketQuerySchema.safeParse({ limit: '101' }).success).toBe(false)

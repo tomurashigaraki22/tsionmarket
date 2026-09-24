@@ -20,6 +20,7 @@ export const marketQuerySchema = z
   .object({
     networkId: z.string().max(64).optional(),
     venue: z.enum(['0x', 'jupiter']).optional(),
+    marketCategory: z.enum(['meme']).optional(),
     search: z.string().max(64).optional(),
     limit: z.coerce.number().int().min(1).max(100).default(50),
     cursor: z.string().max(1000).optional(),
