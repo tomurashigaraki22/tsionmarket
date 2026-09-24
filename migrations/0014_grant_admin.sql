@@ -1,0 +1,22 @@
+-- Grants the founding account the admin role, so there is someone who can
+-- read the moderation queue and remove a reported post.
+--
+-- There is deliberately no API for changing a role: an endpoint that grants
+-- privileges is a privilege-escalation surface, and the only promotion this
+-- system needs at launch is this one. Later grants are a considered act
+-- against the database, not a feature.
+--
+-- The email column is ascii_general_ci, so this matches regardless of case.
+-- If the account does not exist the statement affects no rows and succeeds,
+-- which keeps a fresh database migratable -- see the caveat below.
+UPDATE users SET role = 'admin' WHERE email = 'devtomiwa9@gmail.com';
+
+-- CAVEAT for a database built from scratch: migrations run once and are
+-- recorded by checksum, so on a fresh install this executes before the
+-- account is registered, matches nothing, and is never retried. The grant
+-- then has to be repeated by hand:
+--
+--   UPDATE users SET role = 'admin' WHERE email = '<address>';
+--
+-- The same statement raises an account to 'verified', which is what permits
+-- posting links on the Floor.
