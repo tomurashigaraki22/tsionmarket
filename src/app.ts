@@ -31,6 +31,8 @@ import type { OwnershipService } from './portfolio/OwnershipService.js'
 import type { ProfileRepository } from './social/ProfileRepository.js'
 import type { FloorService } from './social/FloorService.js'
 import { socialRouter } from './api/routes/social.js'
+import type { ArcadeRepository } from './arcade/ArcadeRepository.js'
+import { arcadeRouter } from './api/routes/arcade.js'
 
 export type AppDependencies = {
   environment: Environment
@@ -47,6 +49,7 @@ export type AppDependencies = {
   ownershipService?: OwnershipService
   profileRepository?: ProfileRepository
   floorService?: FloorService
+  arcadeRepository?: ArcadeRepository
 }
 
 export function createApp({
@@ -64,6 +67,7 @@ export function createApp({
   ownershipService,
   profileRepository,
   floorService,
+  arcadeRepository,
 }: AppDependencies): Express {
   const app = express()
   app.disable('x-powered-by')
@@ -116,6 +120,7 @@ export function createApp({
         new ChartService(environment),
       ),
     )
+  if (arcadeRepository) app.use('/v1', arcadeRouter(arcadeRepository))
   if (authService) {
     app.use('/v1/auth', authRouter(authService, environment))
     // Future /v1 routers inherit a fail-closed authenticated boundary unless

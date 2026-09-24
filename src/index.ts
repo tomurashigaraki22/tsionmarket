@@ -22,6 +22,7 @@ import { TransactionRepository } from './transactions/TransactionRepository.js'
 import { TransactionService } from './transactions/TransactionService.js'
 import { ReconciliationWorker } from './transactions/ReconciliationWorker.js'
 import { ValuationService } from './portfolio/ValuationService.js'
+import { ArcadeRepository } from './arcade/ArcadeRepository.js'
 import { ProfileRepository } from './social/ProfileRepository.js'
 import { FloorRepository } from './social/FloorRepository.js'
 import { FloorService } from './social/FloorService.js'
@@ -46,6 +47,7 @@ const transactionRepository = new TransactionRepository(pool)
 const transactionService = new TransactionService(transactionRepository, rpcManager, environment)
 const reconciliationWorker = new ReconciliationWorker(transactionRepository, rpcManager, environment)
 const valuationService = new ValuationService(pool, balanceService)
+const arcadeRepository = new ArcadeRepository(pool)
 const profileRepository = new ProfileRepository(pool)
 const floorService = new FloorService(new FloorRepository(pool), profileRepository, pool)
 await portfolioRepository.applyNetworkMode(environment.NETWORK_MODE)
@@ -64,6 +66,7 @@ const app = createApp({
   ownershipService,
   profileRepository,
   floorService,
+  arcadeRepository,
 })
 const server = createServer(app)
 
