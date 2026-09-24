@@ -14,7 +14,7 @@ function intertrainAddress(publicKey: Uint8Array): string {
   return bech32m.encodeFromBytes('mna', Buffer.concat([Buffer.from([1]), digest.subarray(0, 20)]))
 }
 
-function setupIntertrain(balance: string) {
+function setupIntertrain(balance: string, feeMinimum: string | null = '100') {
   const owner = nacl.sign.keyPair.fromSeed(new Uint8Array(32).fill(7))
   const recipient = nacl.sign.keyPair.fromSeed(new Uint8Array(32).fill(9))
   const account = {
@@ -48,7 +48,7 @@ function setupIntertrain(balance: string) {
         return {
           chain_id: 'intertrain-1',
           native_asset: { symbol: 'WSK', decimals: 6 },
-          fee_minimum: '100',
+          ...(feeMinimum === null ? {} : { fee_minimum: feeMinimum }),
         }
       return { address: account.address, balance, nonce: 3 }
     }),
@@ -113,6 +113,30 @@ describe('wallet withdrawal intents', () => {
         feeRaw: '100',
         chainId: 'intertrain-1',
       },
+    })
+    expect(repo.createIntent).toHaveBeenCalledOnce()
+  })
+
+  it('uses the web-wallet default fee when chain_info omits fee_minimum', async () => {
+    const { owner, recipient, account, repo, service } = setupIntertrain(
+      '5000000',
+      null,
+    )
+    const result = await service.create('user-id', {
+      accountId: account.id,
+      assetId: 'native',
+      toAddress: intertrainAddress(recipient.publicKey),
+      amountRaw: '1000000',
+      idempotencyKey: 'withdrawal-key-default-fee',
+      publicKey: Buffer.from(owner.publicKey).toString('hex'),
+    })
+
+    expect(result.intent.unsignedTransaction).toMatchObject({
+      payload: { feeRaw: '1' },
+    })
+    expect(result.intent.normalizedSummary).toMatchObject({
+      estimatedNetworkFeeRaw: '1',
+      networkFeeSymbol: 'WSK',
     })
     expect(repo.createIntent).toHaveBeenCalledOnce()
   })

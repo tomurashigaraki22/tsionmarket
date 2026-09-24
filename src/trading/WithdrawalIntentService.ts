@@ -24,6 +24,9 @@ import { canonicalHash, type TradingRepository } from './TradingRepository.js'
 const transferAbi = parseAbi(['function transfer(address to,uint256 amount) returns (bool)'])
 const HEX = /^(?:[0-9a-f]{2})+$/i
 const DECIMAL_RAW = /^[1-9]\d{0,77}$/
+// Intertrain's chain_info RPC currently omits fee_minimum. The web-wallet and
+// SDK both use one raw native unit as the protocol's default minimum fee.
+const INTERTRAIN_DEFAULT_FEE_MINIMUM_RAW = 1n
 const asRecord = (value: unknown): Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -433,7 +436,11 @@ export class WithdrawalIntentService {
         503,
       )
     const info = asRecord(chainInfo)
-    const feeMinimum = rawInteger(info.fee_minimum)
+    const reportedFeeMinimum = info.fee_minimum
+    const feeMinimum =
+      reportedFeeMinimum === undefined || reportedFeeMinimum === null
+        ? INTERTRAIN_DEFAULT_FEE_MINIMUM_RAW
+        : rawInteger(reportedFeeMinimum)
     if (feeMinimum === null)
       throw new AppError(
         'FEE_ESTIMATE_UNAVAILABLE',
