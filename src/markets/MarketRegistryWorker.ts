@@ -130,6 +130,11 @@ export class MarketRegistryWorker {
             priceUsd: price,
             liquidityUsd: liquidity,
             volume24hUsd: numeric(token.daily_volume ?? token.volume24h),
+            // Jupiter reports the 24h move inside stats24h and the cap as
+            // mcap. LI.FI returns neither, so EVM markets stay null and the
+            // UI shows an absence rather than a fabricated zero.
+            priceChange24hPct: numeric(token.stats24h?.priceChange),
+            marketCapUsd: numeric(token.mcap ?? token.marketCap),
             iconUrl: token.icon ?? token.logoURI ?? token.extensions?.logoURI ?? null,
             chartSymbol: token.extensions?.coingeckoId ?? token.coingeckoId ?? symbol.toLowerCase(),
           }

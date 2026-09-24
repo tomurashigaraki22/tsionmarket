@@ -14,6 +14,9 @@ export type MarketInput = {
   priceUsd: number | null
   liquidityUsd: number | null
   volume24hUsd: number | null
+  /** Jupiter only; LI.FI publishes neither, so EVM markets store null. */
+  priceChange24hPct: number | null
+  marketCapUsd: number | null
   iconUrl: string | null
   chartSymbol: string | null
 }
@@ -55,7 +58,7 @@ export class MarketRepository {
       ])
       for (const m of markets)
         await connection.execute(
-          `INSERT INTO spot_markets(market_id,venue,market_category,network_id,base_symbol,quote_symbol,base_token,quote_token,decimals,price_usd,liquidity_usd,volume_24h_usd,icon_url,chart_symbol,last_seen_at,synced_at,active) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW(6),NOW(6),TRUE) ON DUPLICATE KEY UPDATE market_category=VALUES(market_category),base_symbol=VALUES(base_symbol),decimals=VALUES(decimals),price_usd=VALUES(price_usd),liquidity_usd=VALUES(liquidity_usd),volume_24h_usd=VALUES(volume_24h_usd),icon_url=VALUES(icon_url),chart_symbol=VALUES(chart_symbol),last_seen_at=NOW(6),synced_at=NOW(6),active=TRUE`,
+          `INSERT INTO spot_markets(market_id,venue,market_category,network_id,base_symbol,quote_symbol,base_token,quote_token,decimals,price_usd,liquidity_usd,volume_24h_usd,price_change_24h_pct,market_cap_usd,icon_url,chart_symbol,last_seen_at,synced_at,active) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW(6),NOW(6),TRUE) ON DUPLICATE KEY UPDATE market_category=VALUES(market_category),base_symbol=VALUES(base_symbol),decimals=VALUES(decimals),price_usd=VALUES(price_usd),liquidity_usd=VALUES(liquidity_usd),volume_24h_usd=VALUES(volume_24h_usd),price_change_24h_pct=VALUES(price_change_24h_pct),market_cap_usd=VALUES(market_cap_usd),icon_url=VALUES(icon_url),chart_symbol=VALUES(chart_symbol),last_seen_at=NOW(6),synced_at=NOW(6),active=TRUE`,
           [
             m.marketId,
             m.venue,
@@ -69,6 +72,8 @@ export class MarketRepository {
             m.priceUsd,
             m.liquidityUsd,
             m.volume24hUsd,
+            m.priceChange24hPct,
+            m.marketCapUsd,
             m.iconUrl,
             m.chartSymbol,
           ],
@@ -126,7 +131,7 @@ export class MarketRepository {
     }
     params.push(q.limit + 1)
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT m.market_id AS marketId,m.venue,m.market_category AS marketCategory,m.network_id AS networkId,m.base_symbol AS baseSymbol,m.quote_symbol AS quoteSymbol,m.base_token AS baseToken,m.quote_token AS quoteToken,m.decimals,m.decimals AS baseDecimals,6 AS quoteDecimals,TRUE AS executable,'active' AS status,CAST(m.price_usd AS CHAR) AS priceUsd,CAST(m.liquidity_usd AS CHAR) AS liquidityUsd,CAST(m.volume_24h_usd AS CHAR) AS volume24hUsd,m.icon_url AS iconUrl,m.chart_symbol AS chartSymbol,m.synced_at AS syncedAt,m.synced_at AS observedAt FROM spot_markets m JOIN networks n ON n.network_id=m.network_id AND n.enabled=TRUE WHERE ${where.join(' AND ')} ORDER BY COALESCE(m.liquidity_usd,0) DESC,m.market_id ASC LIMIT ?`,
+      `SELECT m.market_id AS marketId,m.venue,m.market_category AS marketCategory,m.network_id AS networkId,m.base_symbol AS baseSymbol,m.quote_symbol AS quoteSymbol,m.base_token AS baseToken,m.quote_token AS quoteToken,m.decimals,m.decimals AS baseDecimals,6 AS quoteDecimals,TRUE AS executable,'active' AS status,CAST(m.price_usd AS CHAR) AS priceUsd,CAST(m.liquidity_usd AS CHAR) AS liquidityUsd,CAST(m.volume_24h_usd AS CHAR) AS volume24hUsd,CAST(m.price_change_24h_pct AS CHAR) AS priceChange24hPct,CAST(m.market_cap_usd AS CHAR) AS marketCapUsd,m.icon_url AS iconUrl,m.chart_symbol AS chartSymbol,m.synced_at AS syncedAt,m.synced_at AS observedAt FROM spot_markets m JOIN networks n ON n.network_id=m.network_id AND n.enabled=TRUE WHERE ${where.join(' AND ')} ORDER BY COALESCE(m.liquidity_usd,0) DESC,m.market_id ASC LIMIT ?`,
       params,
     )
     const hasMore = rows.length > q.limit,
