@@ -23,6 +23,8 @@ import { TransactionService } from './transactions/TransactionService.js'
 import { ReconciliationWorker } from './transactions/ReconciliationWorker.js'
 import { ValuationService } from './portfolio/ValuationService.js'
 import { ArcadeRepository } from './arcade/ArcadeRepository.js'
+import { RoundRepository } from './arcade/RoundRepository.js'
+import { ArcadeWorker } from './arcade/ArcadeWorker.js'
 import { ProfileRepository } from './social/ProfileRepository.js'
 import { FloorRepository } from './social/FloorRepository.js'
 import { FloorService } from './social/FloorService.js'
@@ -48,6 +50,8 @@ const transactionService = new TransactionService(transactionRepository, rpcMana
 const reconciliationWorker = new ReconciliationWorker(transactionRepository, rpcManager, environment)
 const valuationService = new ValuationService(pool, balanceService)
 const arcadeRepository = new ArcadeRepository(pool)
+const roundRepository = new RoundRepository(pool)
+const arcadeWorker = new ArcadeWorker(roundRepository, 2000)
 const profileRepository = new ProfileRepository(pool)
 const floorService = new FloorService(new FloorRepository(pool), profileRepository, pool)
 await portfolioRepository.applyNetworkMode(environment.NETWORK_MODE)
@@ -67,6 +71,7 @@ const app = createApp({
   profileRepository,
   floorService,
   arcadeRepository,
+  roundRepository,
 })
 const server = createServer(app)
 
@@ -74,6 +79,7 @@ server.listen(environment.PORT, environment.HOST, () => {
   authCleanupWorker.start()
   marketRegistryWorker.start()
   reconciliationWorker.start()
+  arcadeWorker.start()
   logger.info('HTTP server started', { host: environment.HOST, port: environment.PORT })
 })
 
@@ -94,6 +100,7 @@ function shutdown(signal: string): void {
       authCleanupWorker.stop()
       marketRegistryWorker.stop()
       reconciliationWorker.stop()
+      arcadeWorker.stop()
       await pool.end()
       if (error) throw error
       clearTimeout(forceTimer)
