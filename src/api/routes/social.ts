@@ -42,6 +42,13 @@ export const createPostSchema = z
   })
   .strict()
 
+export const reportSchema = z
+  .object({
+    reason: z.enum(['spam', 'scam', 'abuse', 'impersonation', 'other']),
+    detail: z.string().trim().max(500).optional(),
+  })
+  .strict()
+
 export function socialRouter(profiles: ProfileRepository, floor: FloorService) {
   const router = Router()
 
@@ -57,6 +64,20 @@ export function socialRouter(profiles: ProfileRepository, floor: FloorService) {
   const postLimit = rateLimit({
     windowMs: 60 * 60_000,
     limit: 30,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+  })
+  const likeLimit = rateLimit({
+    windowMs: 60 * 60_000,
+    limit: 300,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+  })
+  // Reporting is the safety valve, so the limit only exists to stop it being
+  // used as a weapon — the unique constraint already caps one per post.
+  const reportLimit = rateLimit({
+    windowMs: 24 * 60 * 60_000,
+    limit: 20,
     standardHeaders: 'draft-7',
     legacyHeaders: false,
   })
@@ -141,11 +162,78 @@ export function socialRouter(profiles: ProfileRepository, floor: FloorService) {
     }),
   )
 
+  // Registered before '/floor/posts/:postId' so these literal paths are not
+  // captured by the parameterised route and parsed as post ids.
+  router.get(
+    '/floor/reports',
+    asyncHandler(async (req, res) => {
+      res.json({ success: true, data: await floor.reportQueue(requireIdentity(req).userId) })
+    }),
+  )
+
+  router.post(
+    '/floor/posts/:postId/like',
+    likeLimit,
+    asyncHandler(async (req, res) => {
+      const id = z.string().uuid().parse(req.params.postId)
+      await floor.setLiked(id, requireIdentity(req).userId, true)
+      res.status(204).send()
+    }),
+  )
+
+  router.delete(
+    '/floor/posts/:postId/like',
+    likeLimit,
+    asyncHandler(async (req, res) => {
+      const id = z.string().uuid().parse(req.params.postId)
+      await floor.setLiked(id, requireIdentity(req).userId, false)
+      res.status(204).send()
+    }),
+  )
+
+  router.post(
+    '/floor/posts/:postId/report',
+    reportLimit,
+    asyncHandler(async (req, res) => {
+      const id = z.string().uuid().parse(req.params.postId)
+      const input = reportSchema.parse(req.body)
+      await floor.report(id, requireIdentity(req).userId, input.reason, input.detail)
+      res.status(202).json({ success: true, data: { reported: true } })
+    }),
+  )
+
+  router.post(
+    '/floor/posts/:postId/dismiss-reports',
+    asyncHandler(async (req, res) => {
+      const id = z.string().uuid().parse(req.params.postId)
+      await floor.dismissReports(id, requireIdentity(req).userId)
+      res.status(204).send()
+    }),
+  )
+
+  router.post(
+    '/floor/blocks/:userId',
+    asyncHandler(async (req, res) => {
+      const target = z.string().uuid().parse(req.params.userId)
+      await floor.setBlocked(requireIdentity(req).userId, target, true)
+      res.status(204).send()
+    }),
+  )
+
+  router.delete(
+    '/floor/blocks/:userId',
+    asyncHandler(async (req, res) => {
+      const target = z.string().uuid().parse(req.params.userId)
+      await floor.setBlocked(requireIdentity(req).userId, target, false)
+      res.status(204).send()
+    }),
+  )
+
   router.get(
     '/floor/posts/:postId',
     asyncHandler(async (req, res) => {
       const id = z.string().uuid().parse(req.params.postId)
-      res.json({ success: true, data: await floor.thread(id) })
+      res.json({ success: true, data: await floor.thread(id, requireIdentity(req).userId) })
     }),
   )
 

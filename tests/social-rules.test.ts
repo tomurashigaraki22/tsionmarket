@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { HANDLE_PATTERN, containsLink, mayPostLinks, normalizeHandle } from '../src/social/rules.js'
-import { createPostSchema, createProfileSchema } from '../src/api/routes/social.js'
+import { createPostSchema, createProfileSchema, reportSchema } from '../src/api/routes/social.js'
 
 describe('handles', () => {
   it('normalises case, so a handle cannot be claimed twice by casing alone', () => {
@@ -64,5 +64,17 @@ describe('post input', () => {
 
   it('rejects unknown fields rather than silently dropping them', () => {
     expect(() => createPostSchema.parse({ body: 'hi', likeCount: 9999 })).toThrow()
+  })
+})
+
+describe('report input', () => {
+  it('accepts only the reasons the column allows', () => {
+    for (const reason of ['spam', 'scam', 'abuse', 'impersonation', 'other'])
+      expect(reportSchema.parse({ reason }).reason).toBe(reason)
+    expect(() => reportSchema.parse({ reason: 'dislike' })).toThrow()
+  })
+
+  it('holds the optional detail to the column length', () => {
+    expect(() => reportSchema.parse({ reason: 'spam', detail: 'a'.repeat(501) })).toThrow()
   })
 })

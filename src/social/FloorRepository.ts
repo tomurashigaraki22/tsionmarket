@@ -41,6 +41,25 @@ const POST_JOINS = `FROM floor_posts f
   JOIN users u ON u.id = f.author_id
   LEFT JOIN spot_markets m ON m.market_id = f.cited_market_id`
 
+/**
+ * Whether the viewer has liked each row, resolved in the same query as the
+ * page. A second round trip per post would be one request per row.
+ */
+const LIKED_BY_ME = `EXISTS (
+  SELECT 1 FROM floor_post_likes l WHERE l.post_id = f.id AND l.user_id = ?
+) AS likedByMe`
+
+/**
+ * Blocking hides in both directions: the blocker stops seeing that author,
+ * and the blocked account stops seeing the blocker. Hiding one way only
+ * leaves the blocked person free to read and reply.
+ */
+const NOT_BLOCKED = `NOT EXISTS (
+  SELECT 1 FROM floor_blocks b
+  WHERE (b.user_id = ? AND b.blocked_user_id = f.author_id)
+     OR (b.user_id = f.author_id AND b.blocked_user_id = ?)
+)`
+
 export class FloorRepository {
   constructor(private readonly pool: Pool) {}
 
@@ -52,14 +71,17 @@ export class FloorRepository {
    * like_count alone freezes the top of the feed on the oldest good post.
    */
   async feed(query: {
+    viewerId: string
     sort: FeedSort
     limit: number
     cursor?: string | undefined
     popularWindowDays: number
   }) {
     const cursor = decode(query.cursor)
-    const where = [`f.status = 'visible'`, `f.reply_to_id IS NULL`]
-    const params: Array<string | number> = []
+    const where = [`f.status = 'visible'`, `f.reply_to_id IS NULL`, NOT_BLOCKED]
+    // Ordered to match the placeholders: the liked-by-me subselect is in the
+    // SELECT list, the block filter in the WHERE.
+    const params: Array<string | number> = [query.viewerId, query.viewerId, query.viewerId]
 
     if (query.sort === 'popular') {
       where.push('f.created_at >= DATE_SUB(NOW(6), INTERVAL ? DAY)')
@@ -82,7 +104,8 @@ export class FloorRepository {
         : 'f.created_at DESC, f.id ASC'
 
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT ${POST_COLUMNS} ${POST_JOINS} WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ?`,
+      `SELECT ${POST_COLUMNS}, ${LIKED_BY_ME} ${POST_JOINS}
+       WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ?`,
       params,
     )
 
@@ -101,22 +124,117 @@ export class FloorRepository {
     }
   }
 
-  async byId(id: string) {
+  async byId(id: string, viewerId: string) {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT ${POST_COLUMNS} ${POST_JOINS} WHERE f.id = ? AND f.status = 'visible'`,
-      [id],
+      `SELECT ${POST_COLUMNS}, ${LIKED_BY_ME} ${POST_JOINS}
+       WHERE f.id = ? AND f.status = 'visible' AND ${NOT_BLOCKED}`,
+      [viewerId, id, viewerId, viewerId],
     )
     return rows[0] ?? null
   }
 
-  async replies(parentId: string, limit: number) {
+  async replies(parentId: string, viewerId: string, limit: number) {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT ${POST_COLUMNS} ${POST_JOINS}
-       WHERE f.reply_to_id = ? AND f.status = 'visible'
+      `SELECT ${POST_COLUMNS}, ${LIKED_BY_ME} ${POST_JOINS}
+       WHERE f.reply_to_id = ? AND f.status = 'visible' AND ${NOT_BLOCKED}
        ORDER BY f.created_at ASC, f.id ASC LIMIT ?`,
-      [parentId, limit],
+      [viewerId, parentId, viewerId, viewerId, limit],
     )
     return rows
+  }
+
+  /**
+   * Like and unlike. The insert is IGNOREd and the delete checks its own
+   * affected rows, so the counter only moves when the set of likers actually
+   * changed — a retry cannot inflate it.
+   */
+  async setLiked(postId: string, userId: string, liked: boolean): Promise<void> {
+    await withTransaction(this.pool, async (connection) => {
+      const [post] = await connection.execute<RowDataPacket[]>(
+        `SELECT id FROM floor_posts WHERE id = ? AND status = 'visible' FOR UPDATE`,
+        [postId],
+      )
+      if (!post[0]) throw new AppError('POST_NOT_FOUND', 'That post no longer exists', 404)
+
+      const [result] = await connection.execute(
+        liked
+          ? 'INSERT IGNORE INTO floor_post_likes (post_id, user_id) VALUES (?, ?)'
+          : 'DELETE FROM floor_post_likes WHERE post_id = ? AND user_id = ?',
+        [postId, userId],
+      )
+      const changed = (result as { affectedRows?: number }).affectedRows ?? 0
+      if (changed === 0) return
+
+      await connection.execute(
+        liked
+          ? 'UPDATE floor_posts SET like_count = like_count + 1 WHERE id = ?'
+          : 'UPDATE floor_posts SET like_count = GREATEST(like_count, 1) - 1 WHERE id = ?',
+        [postId],
+      )
+    })
+  }
+
+  async report(input: {
+    postId: string
+    reporterId: string
+    reason: string
+    detail?: string | undefined
+  }): Promise<void> {
+    const [post] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT author_id AS authorId FROM floor_posts WHERE id = ? AND status = 'visible'`,
+      [input.postId],
+    )
+    const author = post[0] as { authorId: string } | undefined
+    if (!author) throw new AppError('POST_NOT_FOUND', 'That post no longer exists', 404)
+    if (author.authorId === input.reporterId)
+      throw new AppError('CANNOT_REPORT_OWN_POST', 'You cannot report your own post', 400)
+
+    try {
+      await this.pool.execute(
+        `INSERT INTO floor_reports (id, post_id, reporter_id, reason, detail)
+         VALUES (?, ?, ?, ?, ?)`,
+        [randomUUID(), input.postId, input.reporterId, input.reason, input.detail ?? null],
+      )
+    } catch (error) {
+      // Reporting the same post twice is not an error worth showing: the
+      // report is already filed.
+      if ((error as { code?: string }).code !== 'ER_DUP_ENTRY') throw error
+    }
+  }
+
+  async setBlocked(userId: string, blockedUserId: string, blocked: boolean): Promise<void> {
+    if (userId === blockedUserId)
+      throw new AppError('CANNOT_BLOCK_SELF', 'You cannot block yourself', 400)
+    await this.pool.execute(
+      blocked
+        ? 'INSERT IGNORE INTO floor_blocks (user_id, blocked_user_id) VALUES (?, ?)'
+        : 'DELETE FROM floor_blocks WHERE user_id = ? AND blocked_user_id = ?',
+      [userId, blockedUserId],
+    )
+  }
+
+  /** The moderation queue: open reports, newest first, with the post's text. */
+  async openReports(limit: number) {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT r.id, r.post_id AS postId, r.reason, r.detail, r.created_at AS createdAt,
+        f.body, f.status AS postStatus, p.handle AS authorHandle,
+        (SELECT COUNT(*) FROM floor_reports x WHERE x.post_id = r.post_id AND x.status = 'open') AS reportCount
+       FROM floor_reports r
+       JOIN floor_posts f ON f.id = r.post_id
+       JOIN user_profiles p ON p.user_id = f.author_id
+       WHERE r.status = 'open'
+       ORDER BY r.created_at DESC LIMIT ?`,
+      [limit],
+    )
+    return rows
+  }
+
+  async resolveReports(postId: string, adminId: string, status: 'actioned' | 'dismissed') {
+    await this.pool.execute(
+      `UPDATE floor_reports SET status = ?, resolved_by = ?, resolved_at = NOW(6)
+       WHERE post_id = ? AND status = 'open'`,
+      [status, adminId, postId],
+    )
   }
 
   async create(input: FloorPostInput): Promise<string> {

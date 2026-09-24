@@ -47,7 +47,7 @@ const transactionService = new TransactionService(transactionRepository, rpcMana
 const reconciliationWorker = new ReconciliationWorker(transactionRepository, rpcManager, environment)
 const valuationService = new ValuationService(pool, balanceService)
 const profileRepository = new ProfileRepository(pool)
-const floorService = new FloorService(new FloorRepository(pool), profileRepository)
+const floorService = new FloorService(new FloorRepository(pool), profileRepository, pool)
 await portfolioRepository.applyNetworkMode(environment.NETWORK_MODE)
 const app = createApp({
   environment,
