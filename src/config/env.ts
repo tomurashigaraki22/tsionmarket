@@ -1,6 +1,12 @@
 import { z } from 'zod'
 
 const booleanFromEnvironment = z.enum(['true', 'false']).transform((value) => value === 'true')
+const providerServiceKey = z
+  .string()
+  .min(1)
+  .max(4096)
+  .regex(/^[\x21-\x7e]+$/)
+  .optional()
 
 // Whitespace is never meaningful in a URL, and stray spaces are easy to
 // introduce when hand-editing a .env. Trim before validating so the failure is
@@ -123,6 +129,13 @@ export const EnvironmentSchema = z
       .regex(/^[a-zA-Z0-9_-]+$/)
       .default('tewa'),
     LIFI_QUOTE_TIMEOUT_MS: z.coerce.number().int().min(1000).max(30_000).default(15_000),
+    // OnSwitch uses the same API origin for sandbox and live credentials.
+    // Keep the two secrets separate and select them only on the server.
+    ONSWITCH_ENABLED: booleanFromEnvironment.default('false'),
+    ONSWITCH_ENVIRONMENT: z.enum(['sandbox', 'live']).default('sandbox'),
+    ONSWITCH_SANDBOX_SERVICE_KEY: providerServiceKey,
+    ONSWITCH_LIVE_SERVICE_KEY: providerServiceKey,
+    ONSWITCH_TIMEOUT_MS: z.coerce.number().int().min(1000).max(30_000).default(10_000),
     SWAP_QUOTE_TTL_SECONDS: z.coerce.number().int().min(15).max(300).default(60),
     TRANSACTION_INTENT_TTL_SECONDS: z.coerce.number().int().min(30).max(1800).default(300),
     MAX_SLIPPAGE_BPS: z.coerce.number().int().min(1).max(5000).default(500),
@@ -148,6 +161,37 @@ export const EnvironmentSchema = z
     MYSQL_MIGRATION_LOCK_TIMEOUT_SECONDS: z.coerce.number().int().min(1).max(300).default(30),
   })
   .superRefine((value, context) => {
+    if (value.ONSWITCH_ENABLED) {
+      const activeKey =
+        value.ONSWITCH_ENVIRONMENT === 'sandbox'
+          ? value.ONSWITCH_SANDBOX_SERVICE_KEY
+          : value.ONSWITCH_LIVE_SERVICE_KEY
+      const activeKeyPath =
+        value.ONSWITCH_ENVIRONMENT === 'sandbox'
+          ? 'ONSWITCH_SANDBOX_SERVICE_KEY'
+          : 'ONSWITCH_LIVE_SERVICE_KEY'
+      if (!activeKey) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [activeKeyPath],
+          message: `OnSwitch ${value.ONSWITCH_ENVIRONMENT} mode requires its server-side service key`,
+        })
+      }
+      if (value.ONSWITCH_ENVIRONMENT === 'live' && value.NODE_ENV !== 'production') {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['ONSWITCH_ENVIRONMENT'],
+          message: 'OnSwitch live mode is allowed only in production',
+        })
+      }
+      if (value.ONSWITCH_ENVIRONMENT === 'sandbox' && value.NODE_ENV === 'production') {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['ONSWITCH_ENVIRONMENT'],
+          message: 'OnSwitch sandbox mode is forbidden in production',
+        })
+      }
+    }
     if (Boolean(value.AUTH_ACCESS_TOKEN_PREVIOUS_SECRET) !== Boolean(value.AUTH_ACCESS_TOKEN_PREVIOUS_KID)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,

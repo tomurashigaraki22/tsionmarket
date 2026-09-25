@@ -8,6 +8,32 @@ export const increment = (name: string, amount = 1) =>
   counters.set(safe(name), (counters.get(safe(name)) ?? 0) + amount)
 
 /**
+ * Records a server-to-server provider call using only a bounded provider name,
+ * method, fixed endpoint path, status, and duration. Callers must never pass
+ * request URLs, query values, user IDs, or response text as metric labels.
+ */
+export function recordOutboundRequest(
+  provider: string,
+  method: string,
+  path: string,
+  status: number | string,
+  durationMs: number,
+): void {
+  const endpoint = safe(path.replace(/^\/+/, '')).slice(0, 80) || 'unknown'
+  const outcome = safe(String(status)).slice(0, 32) || 'unknown'
+  const providerName = safe(provider).slice(0, 32) || 'unknown'
+  const verb = safe(method).slice(0, 16) || 'unknown'
+  const requestKey = `provider_requests_total_${providerName}_${verb}_${endpoint}_${outcome}`
+  increment(requestKey)
+
+  const durationKey = `provider_request_duration_ms_${providerName}_${verb}_${endpoint}`
+  const entry = durations.get(durationKey) ?? { count: 0, sum: 0 }
+  entry.count++
+  entry.sum += Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : 0
+  durations.set(durationKey, entry)
+}
+
+/**
  * The normalized route pattern (e.g. `/v1/transactions/:transactionId`), not
  * the literal request path. `req.path` for that same request would contain
  * the actual transaction UUID — a distinct string per transaction ever

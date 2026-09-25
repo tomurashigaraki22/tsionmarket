@@ -11,9 +11,9 @@ Internet ──443──> Caddy ──> api:3456 ──> mysql (internal only)
 
 In **hPanel → Domains → tsionmarket.com → DNS / Nameservers**, add:
 
-| Type | Name  | Points to          | TTL  |
-| ---- | ----- | ------------------ | ---- |
-| A    | `api` | your VPS IPv4      | 3600 |
+| Type | Name  | Points to     | TTL  |
+| ---- | ----- | ------------- | ---- |
+| A    | `api` | your VPS IPv4 | 3600 |
 
 That creates `api.tsionmarket.com`. If the VPS has IPv6, add an `AAAA` record
 with the same name.
@@ -75,14 +75,35 @@ It builds, migrates, starts, and verifies both `127.0.0.1:3456/health` and
 The production config **refuses to start** with development defaults, so these
 have no safe fallback:
 
-| Variable                   | Why                                                 |
-| -------------------------- | --------------------------------------------------- |
+| Variable                   | Why                                                  |
+| -------------------------- | ---------------------------------------------------- |
 | `ACME_EMAIL`               | Let's Encrypt expiry notices                         |
 | `CORS_ALLOWED_ORIGINS`     | Your frontend origin(s), comma separated             |
 | `AUTH_COOKIE_DOMAIN`       | `.tsionmarket.com` for frontend/API session refresh  |
 | `AUTH_SMTP_PASSWORD`       | Hostinger mailbox password                           |
 | `AUTH_EMAIL_LINK_BASE_URL` | Where email links point — your frontend, not the API |
 | `*_RPC_URLS`               | Mainnet RPC endpoints for balances and transactions  |
+
+### OnSwitch (disabled until rollout approval)
+
+The deployment template keeps OnSwitch disabled. Do not enable payment flows
+until vendor onboarding, corridor approval, sandbox verification, and the later
+payment phases are complete. Sandbox and live credentials are distinct even
+though the provider uses one API host:
+
+```ini
+ONSWITCH_ENABLED=false
+ONSWITCH_ENVIRONMENT=live
+ONSWITCH_SANDBOX_SERVICE_KEY=
+ONSWITCH_LIVE_SERVICE_KEY=
+ONSWITCH_TIMEOUT_MS=10000
+```
+
+Keep the selected key only in `deploy/.env` (mode `0600`) or a deployment
+secret manager. Never put it in frontend variables, source code, Git, logs, or
+support messages. Production refuses sandbox mode; live mode requires the live
+key. Local/staging sandbox testing uses `ONSWITCH_ENVIRONMENT=sandbox` and the
+sandbox key.
 
 ### Email via Hostinger SMTP
 

@@ -32,11 +32,7 @@ services:
       - tsionmarket_mysql_data:/var/lib/mysql
       - ./mysql-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test:
-        [
-          'CMD-SHELL',
-          'mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent',
-        ]
+      test: ['CMD-SHELL', 'mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent']
       interval: 5s
       timeout: 5s
       retries: 20
@@ -157,7 +153,13 @@ services:
       context: ..
       target: runtime
     restart: unless-stopped
-    environment: *app-environment
+    environment:
+      <<: *app-environment
+      ONSWITCH_ENABLED: ${ONSWITCH_ENABLED:-false}
+      ONSWITCH_ENVIRONMENT: ${ONSWITCH_ENVIRONMENT:-live}
+      ONSWITCH_SANDBOX_SERVICE_KEY: ${ONSWITCH_SANDBOX_SERVICE_KEY:-}
+      ONSWITCH_LIVE_SERVICE_KEY: ${ONSWITCH_LIVE_SERVICE_KEY:-}
+      ONSWITCH_TIMEOUT_MS: ${ONSWITCH_TIMEOUT_MS:-10000}
     # Loopback only. Public traffic arrives through Caddy over TLS.
     ports:
       - '127.0.0.1:${API_LOCAL_PORT:-3456}:3456'

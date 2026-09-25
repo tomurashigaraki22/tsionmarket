@@ -94,6 +94,14 @@ ARBITRUM_RPC_URLS=
 SOLANA_MAINNET_RPC_URLS=
 
 LIFI_API_KEY=
+
+# OnSwitch payments stay disabled until the provider and corridor are approved.
+# In production, use only a rotated live key from the deployment secret store.
+ONSWITCH_ENABLED=false
+ONSWITCH_ENVIRONMENT=live
+ONSWITCH_SANDBOX_SERVICE_KEY=
+ONSWITCH_LIVE_SERVICE_KEY=
+ONSWITCH_TIMEOUT_MS=10000
 LOG_LEVEL=info
 EOF
   chmod 600 "$ENV_FILE"
@@ -108,6 +116,11 @@ Before deploying, edit it and set:
   AUTH_SMTP_PASSWORD            Hostinger mailbox password (hPanel > Emails)
   AUTH_SMTP_USER / _FROM        adjust if your mailbox is not no-reply@
   *_RPC_URLS                    mainnet RPC endpoints
+
+OnSwitch remains disabled by default. Do not enable it until the integration,
+provider onboarding, and corridor approval are complete. Store any provider key
+only in deploy/.env or a secret manager; sandbox keys must never be used in
+production.
 
 Then point DNS at this server and run ./deploy.sh again.
 EOF

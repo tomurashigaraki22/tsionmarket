@@ -131,7 +131,13 @@ services:
       target: runtime
     profiles: ['app']
     restart: unless-stopped
-    environment: *app-environment
+    environment:
+      <<: *app-environment
+      ONSWITCH_ENABLED: ${ONSWITCH_ENABLED:-false}
+      ONSWITCH_ENVIRONMENT: ${ONSWITCH_ENVIRONMENT:-sandbox}
+      ONSWITCH_SANDBOX_SERVICE_KEY: ${ONSWITCH_SANDBOX_SERVICE_KEY:-}
+      ONSWITCH_LIVE_SERVICE_KEY: ${ONSWITCH_LIVE_SERVICE_KEY:-}
+      ONSWITCH_TIMEOUT_MS: ${ONSWITCH_TIMEOUT_MS:-10000}
     ports:
       - '${API_EXPOSED_PORT:-3030}:3030'
     depends_on:

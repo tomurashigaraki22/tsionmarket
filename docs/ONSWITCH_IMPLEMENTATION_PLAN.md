@@ -1,6 +1,6 @@
 # OnSwitch Payments — Implementation Plan
 
-- **Status:** Proposal; integration is not implemented
+- **Status:** Phase 1 foundation implemented; Phase 0 provider confirmations remain open; payment flows are not implemented
 - **Last reviewed:** 25 September 2026
 - **Scope:** `tsionmarket` backend and `tsionmarket-frontend` only.
 - **Provider docs:** [docs.onswitch.xyz](https://docs.onswitch.xyz/introduction)
@@ -10,7 +10,39 @@
 - The backend `main` worktree is already aligned with `origin/main`; there are no other backend worktrees to merge.
 - The frontend Claude branch `claude/tsionark-landing-plan-5345ac` is an ancestor of frontend `main`. Its changes are already present on `main`; there is no additional Claude diff to pull.
 - The existing untracked `docs/SCRABBLE_IMPLEMENTATION_PLAN.md` is unrelated user work and must remain untouched.
-- This document is a plan only. It does not add a provider adapter, routes, migrations, keys, or UI.
+- This document records the implementation plan and execution status; the Phase 1 adapter/configuration changes are tracked in source. It does not add customer payment routes, migrations, keys, or UI.
+
+## Phase 0–1 execution update — 25 September 2026
+
+### Phase 0: local product and provider contract
+
+The docs-based product boundary and integration contract are now recorded here. The official introduction, authentication/sandbox pages, API reference/OpenAPI schema, coverage, assets, beneficiary, on/off-ramp, swap, status, and webhook docs were reviewed. Locally confirmed details:
+
+| Area                | Confirmed from official docs                                                                                                                      | Still requires Switch/client confirmation                                                                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Authentication      | Server requests use `x-service-key`; sandbox and live keys are separate while API origin is the same.                                             | Confirm whether service keys can be scoped/rotated independently and the production onboarding process.                                                                        |
+| Product scope       | Fiat on-ramp to stablecoin, stablecoin off-ramp to fiat, and stablecoin-to-stablecoin swap endpoints exist.                                       | Confirm commercial enablement and supported live corridors/assets for this TsionMarket partner account.                                                                        |
+| Coverage and assets | `/coverage` and `/asset` expose current country/direction/channel/asset support and ramp/swap flags.                                              | Confirm the account's live limits, exact networks/token contracts, and which assets are enabled for our account.                                                               |
+| On-ramp             | Initiation can name an external wallet beneficiary and returns payment instructions/status.                                                       | Confirm destination-credit timing/finality, exact amount/reference rules, expiries, and failure/refund treatment.                                                              |
+| Off-ramp            | Initiation provides a stablecoin deposit amount/asset/address; `/payment/confirm` accepts the transaction hash for off-ramp deposit confirmation. | Confirm required confirmations, under/overpayment behavior, refund flow, payout reversals, and duplicate-reference handling.                                                   |
+| Webhooks/status     | Docs specify HMAC-SHA256 over raw body, status lookup, callback retries, and payment statuses including `SCHEDULED`, `BLOCKED`, and `REVERSED`.   | Confirm sandbox signing/test-event procedure, replay/timestamp contract, callback delivery SLA, and escalation path.                                                           |
+| Quotes and fees     | Quote endpoints return rate, fee, source/destination amounts, settlement estimate, and expiry.                                                    | Initiate schemas do not identify a quote ID; confirm quote lock/binding, rate changes at initiate, final fee behavior, and payout SLA before describing a quote as guaranteed. |
+| Compliance          | Beneficiary requirements, payment reasons, and AML endpoints are documented.                                                                      | Confirm which party performs KYC/AML, what must be collected, retention/consent requirements, and approved launch jurisdictions with counsel/client.                           |
+
+**Phase 0 is not cleared for live payments.** The local product scope is decided, but vendor answers, partner account configuration, compliance/legal approval, and corridor-specific live verification are external release gates. The previously shared credential should be rotated; no authenticated provider API request has been made with it.
+
+### Phase 1: secure transport/configuration foundation
+
+Implemented in this change:
+
+- Server-only, fixed-origin OnSwitch client with a narrow endpoint allowlist; Switch wallet creation/export/transfer endpoints are deliberately excluded.
+- Separate sandbox/live secret variables, default-disabled feature flag, selected-key validation, and hard guards against sandbox in production or live mode outside production.
+- API key sent only as `x-service-key`; HTTPS origin cannot be overridden, redirects are rejected, request/response byte limits and bounded timeouts are enforced, and ambiguous provider errors are normalized without exposing provider response bodies or request data.
+- Fixed-endpoint provider request counters and latency metrics; no query values, user IDs, PII, body, or credentials become metric labels.
+- Docker Compose passes OnSwitch credentials only to the API container, not the migration job. Local/deploy templates keep the integration disabled and contain no key values.
+- Environment and transport tests cover environment selection, key requirements, request construction, endpoint allowlisting, timeout, size limits, malformed/provider failures, safe errors, and metrics.
+
+**Phase 1 acceptance:** The backend transport/configuration boundary is complete and defaults off. No actual Switch request is made until a rotated sandbox key is configured securely. Phase 1 does not yet add payment tables, customer routes, webhooks, or UI; those belong to later phases below.
 
 ## Product outcome
 
