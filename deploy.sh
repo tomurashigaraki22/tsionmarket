@@ -101,7 +101,13 @@ ONSWITCH_ENABLED=false
 ONSWITCH_ENVIRONMENT=live
 ONSWITCH_SANDBOX_SERVICE_KEY=
 ONSWITCH_LIVE_SERVICE_KEY=
+ONSWITCH_IDEMPOTENCY_SECRET=
 ONSWITCH_TIMEOUT_MS=10000
+ONSWITCH_CATALOGUE_TTL_SECONDS=900
+ONSWITCH_WORKER_INTERVAL_SECONDS=20
+ONSWITCH_WORKER_BATCH_SIZE=20
+ONSWITCH_WORKER_MAX_ATTEMPTS=12
+ONSWITCH_WORKER_LOCK_SECONDS=90
 LOG_LEVEL=info
 EOF
   chmod 600 "$ENV_FILE"
@@ -120,7 +126,8 @@ Before deploying, edit it and set:
 OnSwitch remains disabled by default. Do not enable it until the integration,
 provider onboarding, and corridor approval are complete. Store any provider key
 only in deploy/.env or a secret manager; sandbox keys must never be used in
-production.
+production. Set a separate random ONSWITCH_IDEMPOTENCY_SECRET (at least 32
+characters) before enabling sandbox or live payments.
 
 Then point DNS at this server and run ./deploy.sh again.
 EOF

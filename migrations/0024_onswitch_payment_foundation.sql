@@ -1,0 +1,148 @@
+ALTER TABLE wallet_accounts
+  ADD UNIQUE KEY uq_wallet_accounts_id_user (id, user_id);
+
+ALTER TABLE transaction_intents
+  ADD UNIQUE KEY uq_transaction_intents_id_user (id, user_id);
+
+ALTER TABLE transaction_records
+  ADD UNIQUE KEY uq_transaction_records_id_user (id, user_id);
+
+CREATE TABLE payment_quotes (
+  id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
+  user_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  operation_type VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  request_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  country CHAR(2) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  fiat_currency CHAR(3) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  channel VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  asset_key VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  source_amount DECIMAL(38,18) NULL,
+  destination_amount DECIMAL(38,18) NULL,
+  source_amount_raw DECIMAL(65,0) NULL,
+  destination_amount_raw DECIMAL(65,0) NULL,
+  source_decimals TINYINT UNSIGNED NULL,
+  destination_decimals TINYINT UNSIGNED NULL,
+  rate DECIMAL(38,18) NULL,
+  fee_amount DECIMAL(38,18) NULL,
+  terms_snapshot JSON NOT NULL,
+  expires_at TIMESTAMP(6) NOT NULL,
+  consumed_at TIMESTAMP(6) NULL,
+  created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  CONSTRAINT fk_payment_quotes_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT uq_payment_quotes_id_user UNIQUE (id, user_id),
+  CONSTRAINT chk_payment_quotes_type CHECK (operation_type IN ('onramp','offramp')),
+  INDEX idx_payment_quotes_user_created (user_id, created_at, id),
+  INDEX idx_payment_quotes_expiry (expires_at, consumed_at),
+  INDEX idx_payment_quotes_request (user_id, request_fingerprint, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE payment_beneficiary_refs (
+  id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
+  user_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  provider VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  provider_beneficiary_id VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  country CHAR(2) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  fiat_currency CHAR(3) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  channel VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  holder_type VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  masked_label VARCHAR(120) NOT NULL,
+  created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  CONSTRAINT fk_payment_beneficiary_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT uq_payment_beneficiary_provider_id UNIQUE (user_id, provider, provider_beneficiary_id),
+  CONSTRAINT uq_payment_beneficiary_owner_ref UNIQUE (id, user_id),
+  INDEX idx_payment_beneficiary_user (user_id, created_at, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE payment_operations (
+  id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
+  user_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  quote_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  beneficiary_ref_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  account_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  network_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  provider VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'onswitch',
+  operation_type VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  status VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'created',
+  provider_reference VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  idempotency_key VARCHAR(200) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  request_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  country CHAR(2) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  fiat_currency CHAR(3) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  channel VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  asset_key VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  source_amount DECIMAL(38,18) NULL,
+  destination_amount DECIMAL(38,18) NULL,
+  source_amount_raw DECIMAL(65,0) NULL,
+  destination_amount_raw DECIMAL(65,0) NULL,
+  source_decimals TINYINT UNSIGNED NULL,
+  destination_decimals TINYINT UNSIGNED NULL,
+  terms_snapshot JSON NULL,
+  safe_instructions JSON NULL,
+  chain_tx_hash VARCHAR(160) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  transaction_intent_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  transaction_record_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  provider_status VARCHAR(40) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  last_error_code VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  reconcile_attempts SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+  next_reconcile_at TIMESTAMP(6) NULL,
+  reconcile_lock_until TIMESTAMP(6) NULL,
+  confirmation_attempts SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+  next_confirmation_at TIMESTAMP(6) NULL,
+  confirmation_lock_until TIMESTAMP(6) NULL,
+  confirmation_acknowledged_at TIMESTAMP(6) NULL,
+  expires_at TIMESTAMP(6) NULL,
+  completed_at TIMESTAMP(6) NULL,
+  created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  CONSTRAINT fk_payment_operations_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_payment_operations_quote FOREIGN KEY (quote_id, user_id) REFERENCES payment_quotes(id, user_id),
+  CONSTRAINT fk_payment_operations_beneficiary FOREIGN KEY (beneficiary_ref_id, user_id) REFERENCES payment_beneficiary_refs(id, user_id),
+  CONSTRAINT fk_payment_operations_account FOREIGN KEY (account_id, user_id) REFERENCES wallet_accounts(id, user_id),
+  CONSTRAINT fk_payment_operations_network FOREIGN KEY (network_id) REFERENCES networks(network_id),
+  CONSTRAINT fk_payment_operations_transaction_intent FOREIGN KEY (transaction_intent_id, user_id) REFERENCES transaction_intents(id, user_id),
+  CONSTRAINT fk_payment_operations_transaction_record FOREIGN KEY (transaction_record_id, user_id) REFERENCES transaction_records(id, user_id),
+  CONSTRAINT uq_payment_operation_idempotency UNIQUE (user_id, idempotency_key),
+  CONSTRAINT uq_payment_provider_reference UNIQUE (provider, provider_reference),
+  CONSTRAINT chk_payment_operation_type CHECK (operation_type IN ('onramp','offramp')),
+  CONSTRAINT chk_payment_operation_status CHECK (status IN ('created','quoted','initiating','awaiting_fiat','awaiting_chain','chain_submitted','processing','completed','failed','expired','blocked','scheduled','reversed','unknown','manual_review')),
+  INDEX idx_payment_operations_user_history (user_id, created_at, id),
+  INDEX idx_payment_operations_reconcile (status, next_reconcile_at, reconcile_lock_until),
+  INDEX idx_payment_operations_confirmation (next_confirmation_at, confirmation_lock_until),
+  INDEX idx_payment_operations_expiry (status, expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE payment_state_transitions (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  payment_operation_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  from_status VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  to_status VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  source VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  provider_status VARCHAR(40) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  event_digest CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  CONSTRAINT fk_payment_transition_operation FOREIGN KEY (payment_operation_id) REFERENCES payment_operations(id) ON DELETE CASCADE,
+  CONSTRAINT chk_payment_transition_source CHECK (source IN ('local','webhook','reconciliation','confirmation')),
+  INDEX idx_payment_transitions_operation (payment_operation_id, created_at, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE onswitch_webhook_inbox (
+  id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
+  payment_operation_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  event_digest CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  provider_reference VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  provider_type VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  provider_status VARCHAR(40) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  delivery_timestamp VARCHAR(80) NULL,
+  state VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'pending',
+  attempts SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+  next_attempt_at TIMESTAMP(6) NULL,
+  processing_lock_until TIMESTAMP(6) NULL,
+  last_error_code VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  received_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  processed_at TIMESTAMP(6) NULL,
+  CONSTRAINT fk_onswitch_webhook_operation FOREIGN KEY (payment_operation_id) REFERENCES payment_operations(id) ON DELETE CASCADE,
+  CONSTRAINT uq_onswitch_webhook_digest UNIQUE (event_digest),
+  CONSTRAINT chk_onswitch_webhook_state CHECK (state IN ('pending','processed','manual_review')),
+  INDEX idx_onswitch_webhook_pending (state, next_attempt_at, processing_lock_until, received_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

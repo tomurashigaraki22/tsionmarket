@@ -96,14 +96,22 @@ ONSWITCH_ENABLED=false
 ONSWITCH_ENVIRONMENT=live
 ONSWITCH_SANDBOX_SERVICE_KEY=
 ONSWITCH_LIVE_SERVICE_KEY=
+ONSWITCH_IDEMPOTENCY_SECRET=
 ONSWITCH_TIMEOUT_MS=10000
+ONSWITCH_CATALOGUE_TTL_SECONDS=900
+ONSWITCH_WORKER_INTERVAL_SECONDS=20
+ONSWITCH_WORKER_BATCH_SIZE=20
+ONSWITCH_WORKER_MAX_ATTEMPTS=12
+ONSWITCH_WORKER_LOCK_SECONDS=90
 ```
 
 Keep the selected key only in `deploy/.env` (mode `0600`) or a deployment
 secret manager. Never put it in frontend variables, source code, Git, logs, or
 support messages. Production refuses sandbox mode; live mode requires the live
 key. Local/staging sandbox testing uses `ONSWITCH_ENVIRONMENT=sandbox` and the
-sandbox key.
+sandbox key. The separate `ONSWITCH_IDEMPOTENCY_SECRET` must be a random server
+secret of at least 32 characters; it HMAC-fingerprints idempotent payment
+requests without storing beneficiary form values in the database.
 
 ### Email via Hostinger SMTP
 

@@ -8,7 +8,6 @@ const GET_PATHS = [
   '/beneficiary/requirement',
   '/beneficiary/fetch',
   '/institution',
-  '/institution/lookup',
   '/payment/status',
   '/payment/history',
   '/payment/summary',
@@ -18,6 +17,7 @@ const GET_PATHS = [
 const POST_PATHS = [
   '/beneficiary/create',
   '/compliance/aml/lookup',
+  '/institution/lookup',
   '/onramp/quote',
   '/onramp/rate',
   '/onramp/initiate',

@@ -60,6 +60,7 @@ describe('environment validation', () => {
       ONSWITCH_ENABLED: 'true',
       ONSWITCH_ENVIRONMENT: 'sandbox',
       ONSWITCH_SANDBOX_SERVICE_KEY: 'sandbox-test-secret-not-real',
+      ONSWITCH_IDEMPOTENCY_SECRET: 'idem-test-secret-with-at-least-32-chars',
     })
     expect(getOnSwitchRuntimeConfig(environment)).toEqual({
       environment: 'sandbox',
@@ -87,6 +88,7 @@ describe('environment validation', () => {
       AUTH_REFRESH_TOKEN_PEPPER: 'b'.repeat(40),
       AUTH_PASSWORD_PEPPER: 'c'.repeat(40),
       AUTH_CHALLENGE_PEPPER: 'd'.repeat(40),
+      ONSWITCH_IDEMPOTENCY_SECRET: 'idem-test-secret-with-at-least-32-chars',
       AUTH_EMAIL_DELIVERY_MODE: 'http',
       AUTH_EMAIL_PROVIDER_URL: 'https://mail.example.test/send',
       AUTH_EMAIL_PROVIDER_API_KEY: 'mail-test-secret-not-real',

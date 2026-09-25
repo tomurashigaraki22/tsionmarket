@@ -37,6 +37,12 @@ import { FloorRepository } from './social/FloorRepository.js'
 import { FloorService } from './social/FloorService.js'
 import { OwnershipRepository } from './portfolio/OwnershipRepository.js'
 import { OwnershipService } from './portfolio/OwnershipService.js'
+import { getOnSwitchRuntimeConfig } from './config/onswitch.js'
+import { OnSwitchClient } from './payments/onswitch/client.js'
+import { OnSwitchPaymentRepository } from './payments/onswitch/repository.js'
+import { OnSwitchCatalogueService } from './payments/onswitch/catalogue.js'
+import { OnSwitchWebhookService } from './payments/onswitch/webhook.js'
+import { OnSwitchWorker } from './payments/onswitch/worker.js'
 
 const environment = getEnvironment()
 const pool = createApplicationPool(environment)
@@ -72,6 +78,14 @@ const settingsRepository = new SettingsRepository(pool)
 const chessWorker = new ChessWorker(chessRepository)
 const profileRepository = new ProfileRepository(pool)
 const floorService = new FloorService(new FloorRepository(pool), profileRepository, pool)
+const onSwitchConfig = getOnSwitchRuntimeConfig(environment)
+const onSwitchClient = onSwitchConfig ? new OnSwitchClient(onSwitchConfig) : null
+const onSwitchPaymentRepository = new OnSwitchPaymentRepository(pool)
+const onSwitchCatalogue = new OnSwitchCatalogueService(onSwitchClient, onSwitchPaymentRepository, environment)
+const onSwitchWebhook = new OnSwitchWebhookService(onSwitchConfig, onSwitchPaymentRepository)
+const onSwitchWorker = onSwitchClient
+  ? new OnSwitchWorker(onSwitchPaymentRepository, onSwitchClient, environment)
+  : null
 await portfolioRepository.applyNetworkMode(environment.NETWORK_MODE)
 const app = createApp({
   environment,
@@ -95,6 +109,9 @@ const app = createApp({
   chessRepository,
   settingsRepository,
   withdrawalIntentService,
+  onSwitchPaymentRepository,
+  onSwitchCatalogue,
+  onSwitchWebhook,
 })
 const server = createServer(app)
 
@@ -105,6 +122,7 @@ server.listen(environment.PORT, environment.HOST, () => {
   arcadeWorker.start()
   chessWorker.start()
   depositWatcher.start()
+  onSwitchWorker?.start()
   logger.info('HTTP server started', { host: environment.HOST, port: environment.PORT })
 })
 
@@ -128,6 +146,7 @@ function shutdown(signal: string): void {
       arcadeWorker.stop()
       chessWorker.stop()
       depositWatcher.stop()
+      onSwitchWorker?.stop()
       await pool.end()
       if (error) throw error
       clearTimeout(forceTimer)

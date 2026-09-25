@@ -1,6 +1,6 @@
 # OnSwitch Payments — Implementation Plan
 
-- **Status:** Phase 1 foundation implemented; Phase 0 provider confirmations remain open; payment flows are not implemented
+- **Status:** Phases 1–3 backend foundations implemented; Phase 0 provider confirmations remain open; payment initiation and UI are not implemented
 - **Last reviewed:** 25 September 2026
 - **Scope:** `tsionmarket` backend and `tsionmarket-frontend` only.
 - **Provider docs:** [docs.onswitch.xyz](https://docs.onswitch.xyz/introduction)
@@ -10,9 +10,9 @@
 - The backend `main` worktree is already aligned with `origin/main`; there are no other backend worktrees to merge.
 - The frontend Claude branch `claude/tsionark-landing-plan-5345ac` is an ancestor of frontend `main`. Its changes are already present on `main`; there is no additional Claude diff to pull.
 - The existing untracked `docs/SCRABBLE_IMPLEMENTATION_PLAN.md` is unrelated user work and must remain untouched.
-- This document records the implementation plan and execution status; the Phase 1 adapter/configuration changes are tracked in source. It does not add customer payment routes, migrations, keys, or UI.
+- This document records the implementation plan and execution status. Backend phases 1–3 are tracked in source; customer quote/initiation flows and payment UI remain future work. No provider credentials are stored here.
 
-## Phase 0–1 execution update — 25 September 2026
+## Phase 0–3 execution update — 25 September 2026
 
 ### Phase 0: local product and provider contract
 
@@ -42,7 +42,30 @@ Implemented in this change:
 - Docker Compose passes OnSwitch credentials only to the API container, not the migration job. Local/deploy templates keep the integration disabled and contain no key values.
 - Environment and transport tests cover environment selection, key requirements, request construction, endpoint allowlisting, timeout, size limits, malformed/provider failures, safe errors, and metrics.
 
-**Phase 1 acceptance:** The backend transport/configuration boundary is complete and defaults off. No actual Switch request is made until a rotated sandbox key is configured securely. Phase 1 does not yet add payment tables, customer routes, webhooks, or UI; those belong to later phases below.
+**Phase 1 acceptance:** The backend transport/configuration boundary is complete and defaults off. No actual Switch request is made until a rotated sandbox key is configured securely. Phase 1 does not add quote/initiation flows or UI; durable lifecycle and read-only capability APIs are implemented in Phases 2–3 below.
+
+### Phase 2: durable lifecycle, signed callbacks, and reconciliation foundation
+
+Implemented in this change:
+
+- Added migrations for payment quote/operation records, per-user opaque beneficiary references, transition history, a digest-only webhook inbox, and provider catalogue cache. Payment rows are tied to their owner, wallet account, quote, beneficiary, and any linked confirmed transaction; linked wallet and transaction foreign keys enforce matching user ownership.
+- Added HMAC-fingerprinted operation/idempotency primitives. Reusing a key with the same request returns the existing operation; reusing it with changed request material conflicts. Quotes are user-scoped, expiry-checked, locked before consumption, and consumed only when an operation is successfully inserted.
+- Added a narrowly mounted public callback endpoint before JSON parsing. It verifies HMAC-SHA256 over exact raw request bytes with constant-time comparison, validates event shape/reference/type, stores only a digest and normalized metadata, and rejects unknown or mismatched local payment references. The unsigned timestamp header is diagnostic metadata only; event-digest deduplication is the replay defense.
+- Added a bounded worker for inbox processing, off-ramp confirmation retries, provider status reconciliation, backoff, row locking, and manual-review ceilings. Callback and reconciliation transitions are idempotent and never credit balances.
+- Added user-scoped payment history/detail repository reads.
+
+**Phase 2 boundary:** No quote or initiation endpoint calls OnSwitch to start a customer payment yet. Provider reference/idempotency semantics remain an external Phase 0 gate; Phases 4–5 must resolve ambiguous initiation without blind retries. Migrations have not been applied or integration-tested against MySQL in this local environment. Retention/deletion policy and any encryption required for future payment instructions remain release work.
+
+### Phase 3: dynamic capabilities and beneficiary support foundation
+
+Implemented in this change:
+
+- Added authenticated, read-only endpoints for dynamic payment capabilities, beneficiary field requirements, institutions, account-name lookup, local saved-beneficiary references, and refresh of a user-owned provider beneficiary.
+- Coverage, assets, requirements, institutions, and safe beneficiary-existence data are schema-validated and cached with bounded TTL plus `asOf`/`stale` metadata. Stale data can be displayed, but the operation-selection guard rejects it for new payment use.
+- Provider assets are intersected with enabled networks, the user's active verified accounts, and TsionMarket's canonical token address/decimal registry. Provider names, symbols, IDs, contract addresses, and network IDs supplied by a client are not trusted for eligibility.
+- Account lookup returns only a matched name, institution code, and last four account digits. Saved beneficiaries return a local ID and masked label; provider PII and raw responses are not exposed or cached.
+
+**Phase 3 boundary:** Capabilities are not payment execution. The integration remains disabled by default, the previously exposed sandbox key must be rotated, and no authenticated provider request has been made. Database-backed API behaviour and migrations need a MySQL integration run before enabling the provider. Frontend payment UX remains a later phase.
 
 ## Product outcome
 

@@ -135,7 +135,18 @@ export const EnvironmentSchema = z
     ONSWITCH_ENVIRONMENT: z.enum(['sandbox', 'live']).default('sandbox'),
     ONSWITCH_SANDBOX_SERVICE_KEY: providerServiceKey,
     ONSWITCH_LIVE_SERVICE_KEY: providerServiceKey,
+    ONSWITCH_IDEMPOTENCY_SECRET: z
+      .string()
+      .min(32)
+      .max(4096)
+      .regex(/^[\x21-\x7e]+$/)
+      .optional(),
     ONSWITCH_TIMEOUT_MS: z.coerce.number().int().min(1000).max(30_000).default(10_000),
+    ONSWITCH_CATALOGUE_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(900),
+    ONSWITCH_WORKER_INTERVAL_SECONDS: z.coerce.number().int().min(5).max(600).default(20),
+    ONSWITCH_WORKER_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(20),
+    ONSWITCH_WORKER_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(100).default(12),
+    ONSWITCH_WORKER_LOCK_SECONDS: z.coerce.number().int().min(10).max(600).default(90),
     SWAP_QUOTE_TTL_SECONDS: z.coerce.number().int().min(15).max(300).default(60),
     TRANSACTION_INTENT_TTL_SECONDS: z.coerce.number().int().min(30).max(1800).default(300),
     MAX_SLIPPAGE_BPS: z.coerce.number().int().min(1).max(5000).default(500),
@@ -175,6 +186,13 @@ export const EnvironmentSchema = z
           code: z.ZodIssueCode.custom,
           path: [activeKeyPath],
           message: `OnSwitch ${value.ONSWITCH_ENVIRONMENT} mode requires its server-side service key`,
+        })
+      }
+      if (!value.ONSWITCH_IDEMPOTENCY_SECRET) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['ONSWITCH_IDEMPOTENCY_SECRET'],
+          message: 'OnSwitch requires a dedicated server-side idempotency secret',
         })
       }
       if (value.ONSWITCH_ENVIRONMENT === 'live' && value.NODE_ENV !== 'production') {

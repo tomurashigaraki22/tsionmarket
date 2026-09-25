@@ -41,6 +41,11 @@ import { chessRouter } from './api/routes/chess.js'
 import type { SettingsRepository } from './settings/SettingsRepository.js'
 import { settingsRouter } from './api/routes/settings.js'
 import type { WithdrawalIntentService } from './trading/WithdrawalIntentService.js'
+import type { OnSwitchPaymentRepository } from './payments/onswitch/repository.js'
+import type { OnSwitchCatalogueService } from './payments/onswitch/catalogue.js'
+import type { OnSwitchWebhookService } from './payments/onswitch/webhook.js'
+import { onSwitchWebhookRouter } from './api/routes/onswitch-webhook.js'
+import { onSwitchPaymentsRouter } from './api/routes/onswitch-payments.js'
 
 export type AppDependencies = {
   environment: Environment
@@ -64,6 +69,9 @@ export type AppDependencies = {
   chessRepository?: ChessRepository
   settingsRepository?: SettingsRepository
   withdrawalIntentService?: WithdrawalIntentService
+  onSwitchPaymentRepository?: OnSwitchPaymentRepository
+  onSwitchCatalogue?: OnSwitchCatalogueService
+  onSwitchWebhook?: OnSwitchWebhookService
 }
 
 export function createApp({
@@ -88,6 +96,9 @@ export function createApp({
   chessRepository,
   settingsRepository,
   withdrawalIntentService,
+  onSwitchPaymentRepository,
+  onSwitchCatalogue,
+  onSwitchWebhook,
 }: AppDependencies): Express {
   const app = express()
   app.disable('x-powered-by')
@@ -110,6 +121,10 @@ export function createApp({
     }),
   )
   app.use(cookieParser())
+  // Switch must be authenticated against the exact raw request bytes before
+  // the global JSON parser mutates them. This public route is intentionally
+  // narrowly mounted and does not change auth for any other /v1 endpoint.
+  if (environment.ONSWITCH_ENABLED && onSwitchWebhook) app.use(onSwitchWebhookRouter(onSwitchWebhook))
   app.use(express.json({ limit: environment.JSON_BODY_LIMIT, strict: true }))
   app.use(
     rateLimit({
@@ -151,6 +166,8 @@ export function createApp({
       )
     if (transactionService && transactionRepository)
       app.use('/v1', transactionsRouter(transactionService, transactionRepository))
+    if (environment.ONSWITCH_ENABLED && onSwitchPaymentRepository && onSwitchCatalogue)
+      app.use('/v1', onSwitchPaymentsRouter(onSwitchCatalogue, onSwitchPaymentRepository))
     if (valuationService && transactionRepository)
       app.use('/v1', phase12Router(valuationService, transactionRepository))
     if (roundRepository && arcadeLimits && depositIntents)
