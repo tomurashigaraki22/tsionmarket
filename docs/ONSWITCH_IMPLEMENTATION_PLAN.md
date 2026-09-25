@@ -301,6 +301,8 @@ The implementation intentionally sends only the documented external-wallet benef
 
 ### Phase 6 — Buy volatile crypto with fiat and optional stablecoin swaps
 
+**Execution status — implemented locally; Switch sandbox verification pending.** A completed on-ramp can be linked to the existing spot quote flow as a distinct, optional trade. The backend verifies that the payment belongs to the signed-in user and selected verified account, is completed, and matches the market's network and exact quote-token contract before persisting the relation; the database enforces same-user ownership. The Wallet activity action also refreshes the live chain balance and requires the original account to remain locally controlled before opening Trade. Switch's separate `/swap` endpoints are not used.
+
 **Work**
 
 - Build a composed journey: on-ramp into supported USDC/USDT; wait until the stablecoin is observable and spendable; then offer a link to the existing spot-swap quote flow for target asset.
@@ -314,6 +316,8 @@ The implementation intentionally sends only the documented external-wallet benef
 - Copy and UI describe fiat-to-stablecoin plus optional spot swap as separate steps—not instant, guaranteed, or atomic.
 
 ### Phase 7 — Wallet UI, activity, and communication
+
+**Execution status — implemented locally; Switch sandbox and responsive-browser QA pending.** Wallet now has distinct in-app **Add funds** and **Cash out** entry points, dynamic corridor/asset/requirement-driven forms, quote/review states, resumable provider instructions and status history. On-ramp settlement does not imply spendable funds: the UI refreshes the chain balance before offering the separate spot-trade step. Cash-out uses the server-created, payment-bound transfer intent and the existing local unlock/sign/submit flow. The payment modal uses a landscape desktop review and a scrollable mobile sheet with a fixed action footer. No claim is made that the provider is enabled or verified against sandbox in this environment.
 
 **Work**
 

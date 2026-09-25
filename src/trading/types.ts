@@ -22,6 +22,7 @@ export type QuoteRecord = {
   slippageBps: number
   approvalAddress: string | null
   providerSnapshot: Record<string, unknown>
+  sourcePaymentOperationId?: string | null
   expiresAt: Date
   consumedAt: Date | null
 }

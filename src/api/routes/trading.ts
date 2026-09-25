@@ -18,6 +18,7 @@ export const quoteInputSchema = z
       .regex(/^[1-9]\d*$/)
       .max(65),
     sourceAccountId: z.string().uuid(),
+    sourcePaymentId: z.string().uuid().optional(),
     slippageBps: z.number().int().min(1).max(5000).default(50),
   })
   .strict()

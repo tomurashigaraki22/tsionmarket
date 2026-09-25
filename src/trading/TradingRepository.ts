@@ -38,10 +38,41 @@ export class TradingRepository {
   }
   async market(marketId: string) {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT market_id AS marketId,network_id AS networkId,base_token AS baseToken,quote_token AS quoteToken,decimals,active FROM spot_markets WHERE market_id=?`,
+      `SELECT market_id AS marketId,network_id AS networkId,base_token AS baseToken,quote_token AS quoteToken,
+       base_symbol AS baseSymbol,quote_symbol AS quoteSymbol,decimals,active FROM spot_markets WHERE market_id=?`,
       [marketId],
     )
     return rows[0]
+  }
+  async completedOnrampPayment(userId: string, paymentId: string, accountId: string) {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT id,account_id AS accountId,network_id AS networkId,asset_key AS assetKey,
+       terms_snapshot AS termsSnapshot FROM payment_operations
+       WHERE id=? AND user_id=? AND account_id=? AND operation_type='onramp' AND status='completed'`,
+      [paymentId, userId, accountId],
+    )
+    const row = rows[0]
+    if (!row) return null
+    let terms: unknown = row.termsSnapshot
+    try {
+      if (typeof terms === 'string') terms = JSON.parse(terms) as unknown
+    } catch {
+      return null
+    }
+    const root = typeof terms === 'object' && terms !== null ? (terms as Record<string, unknown>) : null
+    const asset =
+      root && typeof root.asset === 'object' && root.asset !== null
+        ? (root.asset as Record<string, unknown>)
+        : null
+    if (!asset || typeof asset.address !== 'string' || typeof asset.symbol !== 'string') return null
+    return {
+      id: String(row.id),
+      accountId: String(row.accountId),
+      networkId: String(row.networkId),
+      assetKey: String(row.assetKey),
+      assetAddress: asset.address,
+      assetSymbol: asset.symbol,
+    }
   }
   async createQuote(input: {
     userId: string
@@ -57,6 +88,7 @@ export class TradingRepository {
     quote: LifiQuote
     integrator: string
     ttl: number
+    sourcePaymentOperationId?: string
   }) {
     const id = randomUUID(),
       expires = new Date(Date.now() + input.ttl * 1000),
@@ -67,9 +99,10 @@ export class TradingRepository {
         buyToken: input.buyToken,
         sellAmountRaw: input.sellAmountRaw,
         slippageBps: input.slippageBps,
+        sourcePaymentOperationId: input.sourcePaymentOperationId ?? null,
       })
     await this.pool.execute(
-      `INSERT INTO swap_quotes(id,user_id,source_account_id,destination_account_id,market_id,provider,integrator,source_network_id,destination_network_id,sell_token,buy_token,sell_amount_raw,buy_amount_raw,minimum_buy_amount_raw,sell_decimals,buy_decimals,slippage_bps,price_impact_bps,estimated_fee_raw,approval_address,provider_tool,provider_snapshot,request_hash,expires_at) VALUES(?,?,?,?,?,'lifi',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO swap_quotes(id,user_id,source_account_id,destination_account_id,market_id,provider,integrator,source_network_id,destination_network_id,sell_token,buy_token,sell_amount_raw,buy_amount_raw,minimum_buy_amount_raw,sell_decimals,buy_decimals,slippage_bps,price_impact_bps,estimated_fee_raw,approval_address,provider_tool,provider_snapshot,request_hash,source_payment_operation_id,expires_at) VALUES(?,?,?,?,?,'lifi',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         id,
         input.userId,
@@ -93,6 +126,7 @@ export class TradingRepository {
         input.quote.tool,
         JSON.stringify(input.quote.snapshot),
         requestHash,
+        input.sourcePaymentOperationId ?? null,
         expires,
       ],
     )
@@ -100,7 +134,7 @@ export class TradingRepository {
   }
   async quote(userId: string, id: string): Promise<QuoteRecord | null> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT id,user_id AS userId,source_account_id AS sourceAccountId,destination_account_id AS destinationAccountId,source_network_id AS sourceNetworkId,destination_network_id AS destinationNetworkId,sell_token AS sellToken,buy_token AS buyToken,CAST(sell_amount_raw AS CHAR) AS sellAmountRaw,CAST(buy_amount_raw AS CHAR) AS buyAmountRaw,CAST(minimum_buy_amount_raw AS CHAR) AS minimumBuyAmountRaw,sell_decimals AS sellDecimals,buy_decimals AS buyDecimals,slippage_bps AS slippageBps,approval_address AS approvalAddress,provider_snapshot AS providerSnapshot,expires_at AS expiresAt,consumed_at AS consumedAt FROM swap_quotes WHERE id=? AND user_id=?`,
+      `SELECT id,user_id AS userId,source_account_id AS sourceAccountId,destination_account_id AS destinationAccountId,source_network_id AS sourceNetworkId,destination_network_id AS destinationNetworkId,sell_token AS sellToken,buy_token AS buyToken,CAST(sell_amount_raw AS CHAR) AS sellAmountRaw,CAST(buy_amount_raw AS CHAR) AS buyAmountRaw,CAST(minimum_buy_amount_raw AS CHAR) AS minimumBuyAmountRaw,sell_decimals AS sellDecimals,buy_decimals AS buyDecimals,slippage_bps AS slippageBps,approval_address AS approvalAddress,provider_snapshot AS providerSnapshot,source_payment_operation_id AS sourcePaymentOperationId,expires_at AS expiresAt,consumed_at AS consumedAt FROM swap_quotes WHERE id=? AND user_id=?`,
       [id, userId],
     )
     const row = rows[0]

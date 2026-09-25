@@ -16,6 +16,7 @@ export class QuoteService {
       side: 'buy' | 'sell'
       amountRaw: string
       sourceAccountId: string
+      sourcePaymentId?: string | undefined
       slippageBps: number
     },
   ) {
@@ -30,6 +31,28 @@ export class QuoteService {
       buyToken = input.side === 'buy' ? String(market.baseToken) : String(market.quoteToken),
       sellDecimals = input.side === 'buy' ? 6 : Number(market.decimals),
       buyDecimals = input.side === 'buy' ? Number(market.decimals) : 6
+    let sourcePaymentOperationId: string | undefined
+    if (input.sourcePaymentId) {
+      if (input.side !== 'buy')
+        throw new AppError(
+          'PAYMENT_SWAP_ASSET_MISMATCH',
+          'An on-ramp payment can only fund a buy using its received stablecoin',
+          409,
+        )
+      const payment = await this.repo.completedOnrampPayment(userId, input.sourcePaymentId, source.id)
+      if (
+        !payment ||
+        payment.networkId !== source.networkId ||
+        payment.assetKey !== `${source.networkId}:${String(market.quoteSymbol).toLowerCase()}` ||
+        String(payment.assetAddress).toLowerCase() !== String(market.quoteToken).toLowerCase()
+      )
+        throw new AppError(
+          'PAYMENT_SWAP_NOT_READY',
+          'Only a completed on-ramp to this wallet and market quote asset can be linked to a spot swap',
+          409,
+        )
+      sourcePaymentOperationId = payment.id
+    }
     const quote = await this.provider.quote({
       source,
       destination: source,
@@ -54,9 +77,11 @@ export class QuoteService {
       quote,
       integrator: this.env.LIFI_INTEGRATOR,
       ttl: this.env.SWAP_QUOTE_TTL_SECONDS,
+      ...(sourcePaymentOperationId ? { sourcePaymentOperationId } : {}),
     })
     return {
       quoteId: stored.id,
+      sourcePaymentId: sourcePaymentOperationId ?? null,
       marketId: input.marketId,
       sourceAccountId: input.sourceAccountId,
       provider: 'lifi',
