@@ -16,5 +16,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run ci
+      - run: npm run security:secrets
       - run: npm run audit:production
       - run: docker build --tag tsionmarket-backend:ci .

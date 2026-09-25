@@ -1,6 +1,6 @@
 # OnSwitch Payments — Implementation Plan
 
-- **Status:** Phases 1–5 backend code implemented; Phase 0 vendor/live-readiness confirmations remain open; frontend payment UI remains future work
+- **Status:** Phases 1–9 code and operator documentation are implemented locally; Phase 0 vendor/live-readiness confirmations and Phase 9 sandbox E2E remain external release gates; production stays disabled
 - **Last reviewed:** 25 September 2026
 - **Scope:** `tsionmarket` backend and `tsionmarket-frontend` only.
 - **Provider docs:** [docs.onswitch.xyz](https://docs.onswitch.xyz/introduction)
@@ -10,7 +10,7 @@
 - The backend `main` worktree is already aligned with `origin/main`; there are no other backend worktrees to merge.
 - The frontend Claude branch `claude/tsionark-landing-plan-5345ac` is an ancestor of frontend `main`. Its changes are already present on `main`; there is no additional Claude diff to pull.
 - The existing untracked `docs/SCRABBLE_IMPLEMENTATION_PLAN.md` is unrelated user work and must remain untouched.
-- This document records the implementation plan and execution status. Backend quote/initiation journeys are in place for Phases 4–5; sandbox-to-live validation and payment UI remain future work. No provider credentials are stored here.
+- This document records the implementation plan and execution status. Backend quote/initiation journeys and the first payment UI are in place. No provider credentials are stored here. An isolated sandbox deployment has not been identified or configured, so the changes are not yet rolled out to users.
 
 ## Phase 0–5 execution update — 25 September 2026
 
@@ -65,7 +65,36 @@ Implemented in this change:
 - Provider assets are intersected with enabled networks, the user's active verified accounts, and TsionMarket's canonical token address/decimal registry. Provider names, symbols, IDs, contract addresses, and network IDs supplied by a client are not trusted for eligibility.
 - Account lookup returns only a matched name, institution code, and last four account digits. Saved beneficiaries return a local ID and masked label; provider PII and raw responses are not exposed or cached.
 
-**Phase 3 boundary:** Capabilities are not payment execution. The integration remains disabled by default, the previously exposed sandbox key must be rotated, and no authenticated provider request has been made. Database-backed API behaviour and migrations need a MySQL integration run before enabling the provider. Frontend payment UX remains a later phase.
+**Phase 3 boundary:** Capabilities are not payment execution. The integration remains disabled by default, the previously exposed sandbox key must be rotated, and no authenticated provider request has been made from this worktree. Database-backed API behavior and migrations need a MySQL integration run before enabling the provider. The payment UI is covered in Phase 7; its sandbox E2E smoke test remains outstanding.
+
+## Phase 8–9 execution update — 25 September 2026
+
+### Phase 8: security, abuse controls, and data minimization
+
+Implemented in code:
+
+- Added authenticated-user rate limits on top of the existing per-IP route limits. Rate-limit denials are audited with only the user, request ID, category, and route; IP addresses, request bodies, account details, and provider responses are excluded. The current user limiter store is process-local; deployments with multiple API replicas need a shared store before relying on it for cross-replica enforcement.
+- Added a transaction-safe per-user pending-operation ceiling. Starts are serialized on the owning user row, active/manual-review states count toward the ceiling, and denials are recorded in `security_events`.
+- Added AES-256-GCM encryption at rest for provider bank/mobile-money instructions. A separate 32-byte key is required when OnSwitch is enabled; authentication fails closed if the key is missing or ciphertext cannot be decrypted. Terminal operations clear one-time instructions. Pending pre-encryption rows are lazily encrypted on first read when the key is configured; terminal legacy rows are cleared. The compatibility path must be retired after old rows are migrated or removed.
+- Added server-side validation against provider-advertised corridor bounds where numeric limits are available, independent on/off-ramp start switches, and operational gauges for active/manual-review work, webhook backlog, oldest pending age, and worker failures.
+- Added an automated source/worktree credential scan to CI. It reports file and credential category only, never the suspected value.
+- Prevented sandbox off-ramp review from requesting a real mainnet wallet transfer. Existing payment status, webhook processing, and reconciliation continue while either direction is paused.
+
+### Phase 9: sandbox operations
+
+Implemented in code/documentation:
+
+- Added a deployment checklist and operator runbook at [`docs/runbooks/onswitch-sandbox.md`](runbooks/onswitch-sandbox.md), covering isolation, environment values, smoke checks, pause/rollback, monitoring, and secret rotation.
+- Kept all payment directions independently pausable; pause only blocks new quotes/starts, not the history/status path or background reconciliation for already-created operations.
+- Added focused tests for encrypted instructions, rate limiting, active-operation limits, corridor bounds, and the credential scanner. CI now runs the credential scan.
+
+Still pending before calling the sandbox rollout complete:
+
+- No named non-production host/Compose stack or isolated sandbox database is configured in this checkout. The live deployment compose explicitly uses `NODE_ENV=production`, and production rejects sandbox credentials. Do not enable sandbox mode there.
+- The sandbox key will be supplied by the operator through the sandbox deployment environment; it is intentionally not in Git, `.env.example`, source, or this plan. No sandbox key is present in this workspace, and no authenticated Switch request or provider E2E test has been run.
+- Local tests do not verify corridor-specific provider simulation, callback signatures/retries, payout/settlement semantics, or alert delivery. Those must be exercised against the isolated sandbox before opening access to all sandbox users.
+
+Therefore Phase 8 implementation is complete pending review of retention/legal policy, and Phase 9 is **prepared but not rollout-verified**. Production remains disabled; a sandbox-wide rollout must happen only on a separate non-production deployment after the runbook smoke checks pass.
 
 ## Product outcome
 

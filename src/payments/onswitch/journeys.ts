@@ -218,7 +218,12 @@ export class OnSwitchPaymentFlowService {
   ) {}
 
   async quote(userId: string, operationType: Direction, input: PaymentQuoteInput) {
-    const { account, asset, providerAsset } = await this.resolveSelection(userId, operationType, input)
+    this.assertDirectionStartsEnabled(operationType)
+    const { account, asset, providerAsset, corridor } = await this.resolveSelection(
+      userId,
+      operationType,
+      input,
+    )
     const amount = providerNumber(input.amount, operationType === 'offramp' ? asset.decimals : 6)
     const providerRequest: Record<string, unknown> = {
       amount,
@@ -231,6 +236,14 @@ export class OnSwitchPaymentFlowService {
     }
     const quote = await this.requestQuote(operationType, providerRequest)
     validateQuoteDirection(quote, operationType, input.currency, asset.symbol, input.channel)
+    if (!new Decimal(quote.source.amount).eq(input.amount))
+      throw new AppError(
+        'PAYMENT_PROVIDER_TERMS_MISMATCH',
+        'Provider quote does not match the amount you requested',
+        502,
+      )
+    const fiatAmount = operationType === 'onramp' ? quote.source.amount : quote.destination.amount
+    assertCorridorAmountWithinLimits(corridor, input.channel, fiatAmount)
     const providerExpiry = validDate(quote.expiry)
     const expiresAt = new Date(Math.min(providerExpiry.getTime(), this.now().getTime() + 60_000))
     if (expiresAt.getTime() <= this.now().getTime())
@@ -298,6 +311,7 @@ export class OnSwitchPaymentFlowService {
     )
     const replayPayment = replay ? await this.requirePayment(userId, replay.id) : null
     if (replayPayment && replayPayment.status !== 'created') return { payment: replayPayment, existing: true }
+    this.assertDirectionStartsEnabled('onramp')
     if (!replay && quote.consumedAt)
       throw new AppError('PAYMENT_QUOTE_CONSUMED', 'This quote has already been used', 409)
     if (quote.terms.providerRequest.channel === 'MOBILEMONEY') {
@@ -350,6 +364,7 @@ export class OnSwitchPaymentFlowService {
     )
     const replayPayment = replay ? await this.requirePayment(userId, replay.id) : null
     if (replayPayment && replayPayment.status !== 'created') return { payment: replayPayment, existing: true }
+    this.assertDirectionStartsEnabled('offramp')
     if (!replay && quote.consumedAt)
       throw new AppError('PAYMENT_QUOTE_CONSUMED', 'This quote has already been used', 409)
     const beneficiary = await this.resolveOfframpBeneficiary(userId, quote.terms, input)
@@ -378,6 +393,12 @@ export class OnSwitchPaymentFlowService {
   }
 
   async createOfframpTransferIntent(userId: string, paymentId: string, idempotencyKey: string) {
+    if (this.environment.ONSWITCH_ENVIRONMENT === 'sandbox' && this.environment.NETWORK_MODE === 'mainnet')
+      throw new AppError(
+        'PAYMENT_SANDBOX_TRANSFER_DISABLED',
+        'Sandbox payouts cannot request a real mainnet wallet transfer',
+        409,
+      )
     const payment = await this.requirePayment(userId, paymentId)
     if (payment.operationType !== 'offramp')
       throw new AppError('PAYMENT_NOT_FOUND', 'Off-ramp payment not found', 404)
@@ -454,7 +475,7 @@ export class OnSwitchPaymentFlowService {
   }
 
   private async resolveSelection(userId: string, direction: Direction, input: PaymentQuoteInput) {
-    const { capabilities, asset } = await this.catalogue.requireAvailableSelection({
+    const { capabilities, asset, corridor } = await this.catalogue.requireAvailableSelection({
       userId,
       operationType: direction,
       country: input.country,
@@ -462,7 +483,7 @@ export class OnSwitchPaymentFlowService {
       channel: input.channel,
       assetKey: input.assetKey,
     })
-    if (!asset)
+    if (!asset || !corridor)
       throw new AppError(
         'PAYMENT_ASSET_UNSUPPORTED',
         'Stablecoin is not available for this payment route',
@@ -479,7 +500,20 @@ export class OnSwitchPaymentFlowService {
       )
     const providerAsset = toProviderAsset(asset.networkId, asset.symbol)
     const address = canonicalWalletAddress(account.family, account.address)
-    return { account: { ...account, address }, asset, providerAsset }
+    return { account: { ...account, address }, asset, providerAsset, corridor }
+  }
+
+  private assertDirectionStartsEnabled(direction: Direction): void {
+    const enabled =
+      direction === 'onramp'
+        ? this.environment.ONSWITCH_ONRAMP_STARTS_ENABLED
+        : this.environment.ONSWITCH_OFFRAMP_STARTS_ENABLED
+    if (!enabled)
+      throw new AppError(
+        'PAYMENT_DIRECTION_PAUSED',
+        'New payments in this direction are temporarily paused. Existing payments remain available.',
+        503,
+      )
   }
 
   private async requestQuote(direction: Direction, body: Record<string, unknown>): Promise<SafeQuote> {
@@ -820,6 +854,32 @@ function validateQuoteDirection(
       'Provider quote does not match the selected route',
       502,
     )
+}
+
+export function assertCorridorAmountWithinLimits(
+  corridor: {
+    payoutLimits: Record<string, { min?: string | undefined; max?: string | undefined } | string>
+  },
+  channel: string,
+  fiatAmount: string,
+): void {
+  const advertised = corridor.payoutLimits[channel]
+  if (!advertised || typeof advertised === 'string') return
+  const amount = new Decimal(fiatAmount)
+  const min = parseProviderLimit(advertised.min)
+  const max = parseProviderLimit(advertised.max)
+  if ((min && amount.lessThan(min)) || (max && amount.greaterThan(max)))
+    throw new AppError(
+      'PAYMENT_CORRIDOR_LIMIT',
+      'The requested amount is outside the provider’s current limit for this route',
+      400,
+    )
+}
+
+function parseProviderLimit(value: string | undefined): Decimal | null {
+  if (!value || !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)) return null
+  const amount = new Decimal(value)
+  return amount.isFinite() && !amount.isNegative() ? amount : null
 }
 
 function quoteFingerprint(quote: SafeQuote) {

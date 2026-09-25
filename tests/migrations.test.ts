@@ -18,6 +18,7 @@ describe('direct SQL safety and migrations', () => {
     const catalogue = migrations.find((migration) => migration.version === '0025')
     const transfer = migrations.find((migration) => migration.version === '0026')
     const paymentSwap = migrations.find((migration) => migration.version === '0027')
+    const paymentAbuse = migrations.find((migration) => migration.version === '0028')
 
     expect(payment?.filename).toBe('0024_onswitch_payment_foundation.sql')
     expect(payment?.sql).toContain('CREATE TABLE payment_operations')
@@ -27,7 +28,9 @@ describe('direct SQL safety and migrations', () => {
     expect(transfer?.sql).toContain("'payment_transfer'")
     expect(paymentSwap?.filename).toBe('0027_payment_spot_swap_link.sql')
     expect(paymentSwap?.sql).toContain('source_payment_operation_id')
-    expect(migrations.at(-1)?.version).toBe('0027')
+    expect(paymentAbuse?.filename).toBe('0028_onswitch_user_active_index.sql')
+    expect(paymentAbuse?.sql).toContain('idx_payment_operations_user_status')
+    expect(migrations.at(-1)?.version).toBe('0028')
   })
 
   it('rejects values that could become unsafe dynamic SQL', () => {

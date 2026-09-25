@@ -21,7 +21,8 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:verify": "tsx src/scripts/verifySchema.ts",
     "ci": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build",
-    "audit:production": "npm audit --omit=dev"
+    "audit:production": "npm audit --omit=dev",
+    "security:secrets": "node scripts/check-secrets.mjs"
   },
   "dependencies": {
     "@scure/base": "^1.2.6",

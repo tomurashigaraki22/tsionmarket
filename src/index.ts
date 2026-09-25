@@ -82,7 +82,11 @@ const profileRepository = new ProfileRepository(pool)
 const floorService = new FloorService(new FloorRepository(pool), profileRepository, pool)
 const onSwitchConfig = getOnSwitchRuntimeConfig(environment)
 const onSwitchClient = onSwitchConfig ? new OnSwitchClient(onSwitchConfig) : null
-const onSwitchPaymentRepository = new OnSwitchPaymentRepository(pool)
+const onSwitchPaymentRepository = new OnSwitchPaymentRepository(
+  pool,
+  environment.ONSWITCH_DATA_ENCRYPTION_KEY,
+  environment.ONSWITCH_MAX_ACTIVE_OPERATIONS_PER_USER,
+)
 const onSwitchCatalogue = new OnSwitchCatalogueService(onSwitchClient, onSwitchPaymentRepository, environment)
 const onSwitchPayments = new OnSwitchPaymentsService(onSwitchPaymentRepository, environment)
 const onSwitchPaymentFlows = new OnSwitchPaymentFlowService(

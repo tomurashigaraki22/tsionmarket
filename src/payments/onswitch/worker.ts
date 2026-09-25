@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { Environment } from '../../config/env.js'
-import { increment } from '../../observability/metrics.js'
+import { increment, setGauge } from '../../observability/metrics.js'
 import { logger } from '../../utils/logger.js'
 import { OnSwitchClientError } from './client.js'
 import type { OnSwitchClient } from './client.js'
@@ -44,6 +44,8 @@ export class OnSwitchWorker {
     if (this.running || !this.environment.ONSWITCH_ENABLED) return
     this.running = true
     try {
+      setGauge('onswitch_onramp_starts_enabled', this.environment.ONSWITCH_ONRAMP_STARTS_ENABLED ? 1 : 0)
+      setGauge('onswitch_offramp_starts_enabled', this.environment.ONSWITCH_OFFRAMP_STARTS_ENABLED ? 1 : 0)
       const webhookCount = await this.repository.processWebhookBatch(
         this.environment.ONSWITCH_WORKER_BATCH_SIZE,
         this.environment.ONSWITCH_WORKER_MAX_ATTEMPTS,
@@ -53,7 +55,19 @@ export class OnSwitchWorker {
       await this.linkConfirmedTransferIntents()
       await this.confirmDueOperations()
       await this.reconcileDueOperations()
+      if (typeof this.repository.operationalSnapshot === 'function') {
+        try {
+          const snapshot = await this.repository.operationalSnapshot()
+          setGauge('onswitch_pending_operations', snapshot.pendingOperations)
+          setGauge('onswitch_manual_review_operations', snapshot.manualReviewOperations)
+          setGauge('onswitch_webhook_backlog', snapshot.webhookBacklog)
+          setGauge('onswitch_oldest_pending_age_seconds', snapshot.oldestPendingAgeSeconds)
+        } catch {
+          increment('onswitch_operational_snapshot_failures_total')
+        }
+      }
     } catch (error) {
+      increment('onswitch_worker_tick_failures_total')
       logger.warn('OnSwitch worker tick failed', {
         errorCode: workerErrorCode(error),
       })

@@ -84,12 +84,16 @@ have no safe fallback:
 | `AUTH_EMAIL_LINK_BASE_URL` | Where email links point — your frontend, not the API |
 | `*_RPC_URLS`               | Mainnet RPC endpoints for balances and transactions  |
 
-### OnSwitch (disabled until rollout approval)
+### OnSwitch (disabled in production until live approval)
 
-The deployment template keeps OnSwitch disabled. Do not enable payment flows
-until vendor onboarding, corridor approval, sandbox verification, and the later
-payment phases are complete. Sandbox and live credentials are distinct even
-though the provider uses one API host:
+The production deployment template keeps OnSwitch disabled. Sandbox credentials
+must only be used on a separate non-production host with an isolated database;
+the backend intentionally refuses sandbox mode when `NODE_ENV=production`.
+Follow [`docs/runbooks/onswitch-sandbox.md`](../docs/runbooks/onswitch-sandbox.md)
+for sandbox setup and verification. Do not enable live payments until vendor
+onboarding, corridor approval, sandbox verification, and release review are
+complete. Sandbox and live credentials are distinct even though the provider
+uses one API host:
 
 ```ini
 ONSWITCH_ENABLED=false
@@ -97,6 +101,8 @@ ONSWITCH_ENVIRONMENT=live
 ONSWITCH_SANDBOX_SERVICE_KEY=
 ONSWITCH_LIVE_SERVICE_KEY=
 ONSWITCH_IDEMPOTENCY_SECRET=
+ONSWITCH_DATA_ENCRYPTION_KEY=<generated 64-hex-character key>
+ONSWITCH_MAX_ACTIVE_OPERATIONS_PER_USER=5
 ONSWITCH_TIMEOUT_MS=10000
 ONSWITCH_CATALOGUE_TTL_SECONDS=900
 ONSWITCH_WORKER_INTERVAL_SECONDS=20
@@ -111,7 +117,10 @@ support messages. Production refuses sandbox mode; live mode requires the live
 key. Local/staging sandbox testing uses `ONSWITCH_ENVIRONMENT=sandbox` and the
 sandbox key. The separate `ONSWITCH_IDEMPOTENCY_SECRET` must be a random server
 secret of at least 32 characters; it HMAC-fingerprints idempotent payment
-requests without storing beneficiary form values in the database.
+requests without storing beneficiary form values in the database. The separate
+`ONSWITCH_DATA_ENCRYPTION_KEY` is 32 random bytes encoded as 64 hex characters;
+it encrypts one-time provider instructions at rest. Back it up with restricted
+access and do not rotate it without re-encrypting pending instructions.
 
 ### Email via Hostinger SMTP
 
@@ -181,7 +190,9 @@ docker compose --env-file .env -f docker-compose.prod.yml exec mysql \
 
 Keep `deploy/.env` backed up somewhere safe and separate. Losing
 `AUTH_PASSWORD_PEPPER` invalidates every stored password hash; losing
-`AUTH_REFRESH_TOKEN_PEPPER` logs everyone out.
+`AUTH_REFRESH_TOKEN_PEPPER` logs everyone out. Losing
+`ONSWITCH_DATA_ENCRYPTION_KEY` makes encrypted pending payment instructions
+unreadable.
 
 ## 7. Notes on the security posture
 

@@ -133,8 +133,14 @@ export const EnvironmentSchema = z
     // Keep the two secrets separate and select them only on the server.
     ONSWITCH_ENABLED: booleanFromEnvironment.default('false'),
     ONSWITCH_ENVIRONMENT: z.enum(['sandbox', 'live']).default('sandbox'),
+    ONSWITCH_ONRAMP_STARTS_ENABLED: booleanFromEnvironment.default('true'),
+    ONSWITCH_OFFRAMP_STARTS_ENABLED: booleanFromEnvironment.default('true'),
     ONSWITCH_SANDBOX_SERVICE_KEY: providerServiceKey,
     ONSWITCH_LIVE_SERVICE_KEY: providerServiceKey,
+    ONSWITCH_DATA_ENCRYPTION_KEY: z
+      .string()
+      .regex(/^[a-fA-F0-9]{64}$/)
+      .optional(),
     ONSWITCH_IDEMPOTENCY_SECRET: z
       .string()
       .min(32)
@@ -147,6 +153,7 @@ export const EnvironmentSchema = z
     ONSWITCH_WORKER_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(20),
     ONSWITCH_WORKER_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(100).default(12),
     ONSWITCH_WORKER_LOCK_SECONDS: z.coerce.number().int().min(10).max(600).default(90),
+    ONSWITCH_MAX_ACTIVE_OPERATIONS_PER_USER: z.coerce.number().int().min(1).max(20).default(5),
     SWAP_QUOTE_TTL_SECONDS: z.coerce.number().int().min(15).max(300).default(60),
     TRANSACTION_INTENT_TTL_SECONDS: z.coerce.number().int().min(30).max(1800).default(300),
     MAX_SLIPPAGE_BPS: z.coerce.number().int().min(1).max(5000).default(500),
@@ -193,6 +200,13 @@ export const EnvironmentSchema = z
           code: z.ZodIssueCode.custom,
           path: ['ONSWITCH_IDEMPOTENCY_SECRET'],
           message: 'OnSwitch requires a dedicated server-side idempotency secret',
+        })
+      }
+      if (!value.ONSWITCH_DATA_ENCRYPTION_KEY) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['ONSWITCH_DATA_ENCRYPTION_KEY'],
+          message: 'OnSwitch requires a dedicated 32-byte payment-instructions encryption key',
         })
       }
       if (value.ONSWITCH_ENVIRONMENT === 'live' && value.NODE_ENV !== 'production') {

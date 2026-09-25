@@ -2,10 +2,16 @@ import type { RequestHandler } from 'express'
 import type { Environment } from '../config/env.js'
 
 const counters = new Map<string, number>(),
+  gauges = new Map<string, number>(),
   durations = new Map<string, { count: number; sum: number }>()
 const safe = (value: string) => value.replace(/[^a-zA-Z0-9_]/g, '_')
 export const increment = (name: string, amount = 1) =>
   counters.set(safe(name), (counters.get(safe(name)) ?? 0) + amount)
+
+export function setGauge(name: string, value: number): void {
+  if (!Number.isFinite(value)) return
+  gauges.set(safe(name), value)
+}
 
 /**
  * Records a server-to-server provider call using only a bounded provider name,
@@ -81,6 +87,7 @@ export function metricsHandler(env: Environment): RequestHandler {
     }
     const lines: string[] = []
     for (const [name, value] of counters) lines.push(`# TYPE ${name} counter`, `${name} ${value}`)
+    for (const [name, value] of gauges) lines.push(`# TYPE ${name} gauge`, `${name} ${value}`)
     for (const [name, value] of durations)
       lines.push(
         `# TYPE ${name} summary`,

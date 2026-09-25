@@ -20,6 +20,7 @@ const ENV = parseEnvironment({
   ONSWITCH_ENABLED: 'true',
   ONSWITCH_ENVIRONMENT: 'sandbox',
   ONSWITCH_SANDBOX_SERVICE_KEY: 'sandbox-secret-not-real',
+  ONSWITCH_DATA_ENCRYPTION_KEY: 'e'.repeat(64),
   ONSWITCH_IDEMPOTENCY_SECRET: 'idempotency-secret-with-at-least-32-chars',
   ONSWITCH_CATALOGUE_TTL_SECONDS: '60',
 })

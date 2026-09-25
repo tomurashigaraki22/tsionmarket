@@ -60,6 +60,7 @@ describe('environment validation', () => {
       ONSWITCH_ENABLED: 'true',
       ONSWITCH_ENVIRONMENT: 'sandbox',
       ONSWITCH_SANDBOX_SERVICE_KEY: 'sandbox-test-secret-not-real',
+      ONSWITCH_DATA_ENCRYPTION_KEY: 'e'.repeat(64),
       ONSWITCH_IDEMPOTENCY_SECRET: 'idem-test-secret-with-at-least-32-chars',
     })
     expect(getOnSwitchRuntimeConfig(environment)).toEqual({
@@ -67,6 +68,18 @@ describe('environment validation', () => {
       serviceKey: 'sandbox-test-secret-not-real',
       timeoutMs: 10_000,
     })
+  })
+
+  it('requires a valid data-encryption key when OnSwitch is enabled', () => {
+    const enabledSandbox = {
+      ...validEnvironment,
+      ONSWITCH_ENABLED: 'true',
+      ONSWITCH_ENVIRONMENT: 'sandbox',
+      ONSWITCH_SANDBOX_SERVICE_KEY: 'sandbox-test-secret-not-real',
+      ONSWITCH_IDEMPOTENCY_SECRET: 'idem-test-secret-with-at-least-32-chars',
+    }
+    expect(() => parseEnvironment(enabledSandbox)).toThrow(/payment-instructions encryption key/)
+    expect(() => parseEnvironment({ ...enabledSandbox, ONSWITCH_DATA_ENCRYPTION_KEY: 'not-hex' })).toThrow()
   })
 
   it('does not permit OnSwitch live credentials in development or test', () => {
@@ -99,6 +112,7 @@ describe('environment validation', () => {
       ONSWITCH_ENABLED: 'true',
       ONSWITCH_ENVIRONMENT: 'sandbox',
       ONSWITCH_SANDBOX_SERVICE_KEY: 'sandbox-test-secret-not-real',
+      ONSWITCH_DATA_ENCRYPTION_KEY: 'e'.repeat(64),
     }
     expect(() => parseEnvironment(productionEnvironment)).toThrow(
       /OnSwitch sandbox mode is forbidden in production/,

@@ -3,6 +3,7 @@ import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql
 import { withTransaction } from '../../db/transaction.js'
 import { fromMysqlDateTime } from '../../db/datetime.js'
 import { AppError } from '../../utils/errors.js'
+import { increment } from '../../observability/metrics.js'
 import {
   canTransitionPayment,
   isPaymentTerminal,
@@ -10,6 +11,11 @@ import {
   type PaymentOperationType,
   type PaymentStatus,
 } from './payments.js'
+import {
+  decryptPaymentInstructions,
+  encryptPaymentInstructions,
+  isEncryptedPaymentInstructions,
+} from './secureData.js'
 
 export type PaymentOperationInput = {
   userId: string
@@ -129,32 +135,26 @@ const decodeJson = (value: unknown): unknown => (typeof value === 'string' ? JSO
 const asDate = (value: string | Date | null): Date | null =>
   value === null ? null : fromMysqlDateTime(value)
 
-function mapOperation(row: OperationRow) {
-  return {
-    id: row.id,
-    operationType: row.operationType,
-    status: row.status,
-    providerReference: row.providerReference,
-    providerStatus: row.providerStatus,
-    country: row.country,
-    fiatCurrency: row.fiatCurrency,
-    channel: row.channel,
-    assetKey: row.assetKey,
-    sourceAmount: row.sourceAmount,
-    destinationAmount: row.destinationAmount,
-    accountId: row.accountId,
-    networkId: row.networkId,
-    chainTxHash: row.chainTxHash,
-    terms: decodeJson(row.termsSnapshot),
-    instructions: decodeJson(row.safeInstructions),
-    expiresAt: asDate(row.expiresAt),
-    createdAt: fromMysqlDateTime(row.createdAt),
-    updatedAt: fromMysqlDateTime(row.updatedAt),
-  }
-}
+const ACTIVE_PAYMENT_STATUSES = [
+  'created',
+  'quoted',
+  'initiating',
+  'awaiting_fiat',
+  'awaiting_chain',
+  'chain_submitted',
+  'processing',
+  'blocked',
+  'scheduled',
+  'unknown',
+  'manual_review',
+] as const
 
 export class OnSwitchPaymentRepository {
-  constructor(private readonly pool: Pool) {}
+  constructor(
+    private readonly pool: Pool,
+    private readonly dataEncryptionKey?: string,
+    private readonly maxActiveOperationsPerUser = 5,
+  ) {}
 
   async createQuote(input: PaymentQuoteInput): Promise<string> {
     const id = randomUUID()
@@ -216,10 +216,37 @@ export class OnSwitchPaymentRepository {
     return row ? { id: String(row.id), requestFingerprint: String(row.requestFingerprint) } : null
   }
 
+  async securityEvent(input: {
+    userId?: string
+    type: string
+    outcome: string
+    requestId?: string
+    metadata?: unknown
+  }): Promise<void> {
+    await this.pool.execute(
+      `INSERT INTO security_events(user_id,event_type,outcome,request_id,metadata) VALUES(?,?,?,?,?)`,
+      [
+        input.userId ?? null,
+        input.type.slice(0, 100),
+        input.outcome.slice(0, 32),
+        input.requestId?.slice(0, 128) ?? null,
+        input.metadata ? JSON.stringify(input.metadata) : null,
+      ],
+    )
+  }
+
   async createOperation(input: PaymentOperationInput): Promise<{ id: string; existing: boolean }> {
     const id = randomUUID()
     try {
       return await withTransaction(this.pool, async (connection) => {
+        // Serialize all payment starts for this owner before idempotency
+        // lookup. This avoids both concurrent cap bypass and same-key races.
+        const [owners] = await connection.execute<RowDataPacket[]>(
+          'SELECT id FROM users WHERE id=? FOR UPDATE',
+          [input.userId],
+        )
+        if (!owners[0]) throw new AppError('PAYMENT_USER_UNAVAILABLE', 'Payment owner is unavailable', 404)
+
         const [replays] = await connection.execute<RowDataPacket[]>(
           `SELECT id,request_fingerprint AS requestFingerprint FROM payment_operations
            WHERE user_id=? AND idempotency_key=? FOR UPDATE`,
@@ -235,6 +262,19 @@ export class OnSwitchPaymentRepository {
             )
           return { id: String(replay.id), existing: true }
         }
+
+        const statusPlaceholders = ACTIVE_PAYMENT_STATUSES.map(() => '?').join(',')
+        const [activeRows] = await connection.execute<RowDataPacket[]>(
+          `SELECT COUNT(*) AS activeCount FROM payment_operations
+           WHERE user_id=? AND status IN (${statusPlaceholders})`,
+          [input.userId, ...ACTIVE_PAYMENT_STATUSES],
+        )
+        if (Number(activeRows[0]?.activeCount ?? 0) >= this.maxActiveOperationsPerUser)
+          throw new AppError(
+            'PAYMENT_PENDING_LIMIT',
+            'You have too many payments still in progress. Check their status before starting another.',
+            429,
+          )
 
         if (input.accountId) {
           const [accounts] = await connection.execute<RowDataPacket[]>(
@@ -311,6 +351,19 @@ export class OnSwitchPaymentRepository {
         return { id, existing: false }
       })
     } catch (error) {
+      if (error instanceof AppError && error.code === 'PAYMENT_PENDING_LIMIT') {
+        try {
+          await this.securityEvent({
+            userId: input.userId,
+            type: 'payment.onswitch.pending_limit',
+            outcome: 'denied',
+            metadata: { maxActiveOperations: this.maxActiveOperationsPerUser },
+          })
+        } catch {
+          increment('onswitch_security_audit_write_failures_total')
+        }
+        throw error
+      }
       if (!isDuplicateKey(error)) throw error
       const [rows] = await this.pool.execute<RowDataPacket[]>(
         `SELECT id,request_fingerprint AS requestFingerprint FROM payment_operations
@@ -412,7 +465,9 @@ export class OnSwitchPaymentRepository {
         [
           next,
           input.providerStatus,
-          JSON.stringify(input.instructions),
+          isPaymentTerminal(next)
+            ? null
+            : JSON.stringify(encryptPaymentInstructions(input.instructions, this.dataEncryptionKey)),
           JSON.stringify(input.terms),
           input.expiresAt,
           isPaymentTerminal(next) ? null : new Date(Date.now() + 20_000),
@@ -549,7 +604,7 @@ export class OnSwitchPaymentRepository {
       if (before !== next && !canTransitionPayment(before, next)) return
       await connection.execute(
         `UPDATE payment_operations SET status=?,provider_status=?,last_error_code=NULL,
-         safe_instructions=COALESCE(?,safe_instructions),terms_snapshot=COALESCE(?,terms_snapshot),
+         safe_instructions=IF(?=1,NULL,COALESCE(?,safe_instructions)),terms_snapshot=COALESCE(?,terms_snapshot),
          expires_at=COALESCE(?,expires_at),
          reconcile_attempts=0,reconcile_lock_until=NULL,
          next_reconcile_at=?,completed_at=IF(?='completed',COALESCE(completed_at,NOW(6)),completed_at)
@@ -557,7 +612,10 @@ export class OnSwitchPaymentRepository {
         [
           next,
           providerStatus.slice(0, 40),
-          snapshot ? JSON.stringify(snapshot.instructions) : null,
+          isPaymentTerminal(next) ? 1 : 0,
+          snapshot
+            ? JSON.stringify(encryptPaymentInstructions(snapshot.instructions, this.dataEncryptionKey))
+            : null,
           snapshot ? JSON.stringify(snapshot.terms) : null,
           snapshot?.expiresAt ?? null,
           isPaymentTerminal(next) ? null : new Date(Date.now() + 20_000),
@@ -632,12 +690,12 @@ export class OnSwitchPaymentRepository {
       `${operationSelect} WHERE p.user_id=? AND p.id=?`,
       [userId, paymentId],
     )
-    return rows[0] ? mapOperation(rows[0]) : null
+    return rows[0] ? await this.mapOperation(rows[0]) : null
   }
 
   async getForWorker(paymentId: string) {
     const [rows] = await this.pool.execute<OperationRow[]>(`${operationSelect} WHERE p.id=?`, [paymentId])
-    return rows[0] ? mapOperation(rows[0]) : null
+    return rows[0] ? await this.mapOperation(rows[0]) : null
   }
 
   async listForUser(userId: string, limit: number, cursor?: { createdAt: Date; id: string }) {
@@ -648,7 +706,7 @@ export class OnSwitchPaymentRepository {
        ORDER BY p.created_at DESC,p.id DESC LIMIT ?`,
       params,
     )
-    return rows.map(mapOperation)
+    return await Promise.all(rows.map((row) => this.mapOperation(row)))
   }
 
   async storeVerifiedWebhook(input: {
@@ -819,7 +877,7 @@ export class OnSwitchPaymentRepository {
       if (changed) {
         await connection.execute(
           `UPDATE payment_operations SET status=?,provider_status=COALESCE(?,provider_status),last_error_code=?,
-           safe_instructions=COALESCE(?,safe_instructions),terms_snapshot=COALESCE(?,terms_snapshot),
+           safe_instructions=IF(?=1,NULL,COALESCE(?,safe_instructions)),terms_snapshot=COALESCE(?,terms_snapshot),
            expires_at=COALESCE(?,expires_at),
            reconcile_attempts=?,next_reconcile_at=?,reconcile_lock_until=NULL,
            completed_at=IF(?='completed',COALESCE(completed_at,NOW(6)),completed_at) WHERE id=?`,
@@ -827,7 +885,10 @@ export class OnSwitchPaymentRepository {
             next,
             providerStatus,
             input.failureCode ?? null,
-            input.instructions ? JSON.stringify(input.instructions) : null,
+            isPaymentTerminal(next) ? 1 : 0,
+            input.instructions
+              ? JSON.stringify(encryptPaymentInstructions(input.instructions, this.dataEncryptionKey))
+              : null,
             input.terms ? JSON.stringify(input.terms) : null,
             input.expiresAt ?? null,
             input.attempt,
@@ -844,13 +905,16 @@ export class OnSwitchPaymentRepository {
       } else {
         await connection.execute(
           `UPDATE payment_operations SET provider_status=COALESCE(?,provider_status),last_error_code=?,
-           safe_instructions=COALESCE(?,safe_instructions),terms_snapshot=COALESCE(?,terms_snapshot),
+           safe_instructions=IF(?=1,NULL,COALESCE(?,safe_instructions)),terms_snapshot=COALESCE(?,terms_snapshot),
            expires_at=COALESCE(?,expires_at),reconcile_attempts=?,
            next_reconcile_at=?,reconcile_lock_until=NULL WHERE id=?`,
           [
             providerStatus,
             input.failureCode ?? null,
-            input.instructions ? JSON.stringify(input.instructions) : null,
+            isPaymentTerminal(next) ? 1 : 0,
+            input.instructions
+              ? JSON.stringify(encryptPaymentInstructions(input.instructions, this.dataEncryptionKey))
+              : null,
             input.terms ? JSON.stringify(input.terms) : null,
             input.expiresAt ?? null,
             input.attempt,
@@ -1034,6 +1098,31 @@ export class OnSwitchPaymentRepository {
     }))
   }
 
+  async operationalSnapshot(): Promise<{
+    pendingOperations: number
+    manualReviewOperations: number
+    webhookBacklog: number
+    oldestPendingAgeSeconds: number
+  }> {
+    const statusPlaceholders = ACTIVE_PAYMENT_STATUSES.map(() => '?').join(',')
+    const [operationRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) AS pendingOperations,
+       SUM(status='manual_review') AS manualReviewOperations,
+       COALESCE(MAX(TIMESTAMPDIFF(SECOND,created_at,NOW(6))),0) AS oldestPendingAgeSeconds
+       FROM payment_operations WHERE provider='onswitch' AND status IN (${statusPlaceholders})`,
+      [...ACTIVE_PAYMENT_STATUSES],
+    )
+    const [webhookRows] = await this.pool.execute<RowDataPacket[]>(
+      "SELECT COUNT(*) AS webhookBacklog FROM onswitch_webhook_inbox WHERE state='pending'",
+    )
+    return {
+      pendingOperations: Number(operationRows[0]?.pendingOperations ?? 0),
+      manualReviewOperations: Number(operationRows[0]?.manualReviewOperations ?? 0),
+      webhookBacklog: Number(webhookRows[0]?.webhookBacklog ?? 0),
+      oldestPendingAgeSeconds: Number(operationRows[0]?.oldestPendingAgeSeconds ?? 0),
+    }
+  }
+
   private async failWebhook(
     connection: PoolConnection,
     eventId: string,
@@ -1052,6 +1141,67 @@ export class OnSwitchPaymentRepository {
         eventId,
       ],
     )
+  }
+
+  private async mapOperation(row: OperationRow) {
+    return {
+      id: row.id,
+      operationType: row.operationType,
+      status: row.status,
+      providerReference: row.providerReference,
+      providerStatus: row.providerStatus,
+      country: row.country,
+      fiatCurrency: row.fiatCurrency,
+      channel: row.channel,
+      assetKey: row.assetKey,
+      sourceAmount: row.sourceAmount,
+      destinationAmount: row.destinationAmount,
+      accountId: row.accountId,
+      networkId: row.networkId,
+      chainTxHash: row.chainTxHash,
+      terms: decodeJson(row.termsSnapshot),
+      instructions: await this.readInstructions(row),
+      expiresAt: asDate(row.expiresAt),
+      createdAt: fromMysqlDateTime(row.createdAt),
+      updatedAt: fromMysqlDateTime(row.updatedAt),
+    }
+  }
+
+  /** Encrypts still-pending legacy instructions on first read; terminal details are discarded. */
+  private async readInstructions(row: OperationRow): Promise<unknown> {
+    const value = decodeJson(row.safeInstructions)
+    if (value === null || isEncryptedPaymentInstructions(value))
+      return decryptPaymentInstructions(value, this.dataEncryptionKey)
+    if (typeof value !== 'object' || Array.isArray(value)) return value
+
+    if (isPaymentTerminal(row.status)) {
+      await this.pool.execute(
+        `UPDATE payment_operations SET safe_instructions=NULL
+         WHERE id=? AND status=? AND safe_instructions IS NOT NULL
+         AND JSON_EXTRACT(safe_instructions,'$._encrypted') IS NULL`,
+        [row.id, row.status],
+      )
+      return null
+    }
+
+    if (!this.dataEncryptionKey) {
+      increment('onswitch_legacy_plaintext_instruction_reads_total')
+      return value
+    }
+
+    const statusPlaceholders = ACTIVE_PAYMENT_STATUSES.map(() => '?').join(',')
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      `UPDATE payment_operations SET safe_instructions=?
+       WHERE id=? AND status IN (${statusPlaceholders}) AND safe_instructions IS NOT NULL
+       AND JSON_EXTRACT(safe_instructions,'$._encrypted') IS NULL`,
+      [
+        JSON.stringify(encryptPaymentInstructions(value as Record<string, unknown>, this.dataEncryptionKey)),
+        row.id,
+        ...ACTIVE_PAYMENT_STATUSES,
+      ],
+    )
+    if (result.affectedRows > 0) increment('onswitch_legacy_plaintext_instructions_encrypted_total')
+    return value
   }
 }
 

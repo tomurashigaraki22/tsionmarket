@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import { parseEnvironment } from '../src/config/env.js'
-import { OnSwitchPaymentFlowService, paymentQuoteInputSchema } from '../src/payments/onswitch/journeys.js'
+import {
+  assertCorridorAmountWithinLimits,
+  OnSwitchPaymentFlowService,
+  paymentQuoteInputSchema,
+} from '../src/payments/onswitch/journeys.js'
 import { OnSwitchPaymentsService } from '../src/payments/onswitch/service.js'
 import type { OnSwitchClient } from '../src/payments/onswitch/client.js'
 import type { OnSwitchCatalogueService } from '../src/payments/onswitch/catalogue.js'
@@ -19,10 +23,95 @@ const environment = parseEnvironment({
   ONSWITCH_ENABLED: 'true',
   ONSWITCH_ENVIRONMENT: 'sandbox',
   ONSWITCH_SANDBOX_SERVICE_KEY: 'sandbox-secret-not-real',
+  ONSWITCH_DATA_ENCRYPTION_KEY: 'e'.repeat(64),
   ONSWITCH_IDEMPOTENCY_SECRET: 'idempotency-secret-with-at-least-32-chars',
 })
 
 describe('OnSwitch payment journeys', () => {
+  it('pauses new quotes per direction when its start switch is off', async () => {
+    const pausedEnvironment = parseEnvironment({
+      NODE_ENV: 'test',
+      MYSQL_HOST: 'localhost',
+      MYSQL_DATABASE: 'payments_test',
+      MYSQL_USER: 'app',
+      MYSQL_PASSWORD: 'password',
+      MYSQL_MIGRATION_USER: 'migration',
+      MYSQL_MIGRATION_PASSWORD: 'password',
+      ONSWITCH_ENABLED: 'true',
+      ONSWITCH_ENVIRONMENT: 'sandbox',
+      ONSWITCH_SANDBOX_SERVICE_KEY: 'sandbox-secret-not-real',
+      ONSWITCH_DATA_ENCRYPTION_KEY: 'e'.repeat(64),
+      ONSWITCH_IDEMPOTENCY_SECRET: 'idempotency-secret-with-at-least-32-chars',
+      ONSWITCH_ONRAMP_STARTS_ENABLED: 'false',
+    })
+    const flow = new OnSwitchPaymentFlowService(
+      {} as OnSwitchClient,
+      {} as OnSwitchCatalogueService,
+      {} as OnSwitchPaymentRepository,
+      {} as OnSwitchPaymentsService,
+      {} as TradingRepository,
+      {} as WithdrawalIntentService,
+      pausedEnvironment,
+    )
+    await expect(
+      flow.quote('user-id', 'onramp', {
+        accountId: '5fe4d3d5-1e43-44d3-93ed-f5d21d4f3596',
+        amount: '1000',
+        country: 'NG',
+        currency: 'NGN',
+        channel: 'BANK',
+        assetKey: 'arbitrum-one:usdc',
+      }),
+    ).rejects.toMatchObject({ code: 'PAYMENT_DIRECTION_PAUSED' })
+  })
+
+  it('never creates a sandbox payout signing request for a mainnet wallet', async () => {
+    const sandboxOnMainnet = parseEnvironment({
+      NODE_ENV: 'test',
+      NETWORK_MODE: 'mainnet',
+      MYSQL_HOST: 'localhost',
+      MYSQL_DATABASE: 'payments_test',
+      MYSQL_USER: 'app',
+      MYSQL_PASSWORD: 'password',
+      MYSQL_MIGRATION_USER: 'migration',
+      MYSQL_MIGRATION_PASSWORD: 'password',
+      ONSWITCH_ENABLED: 'true',
+      ONSWITCH_ENVIRONMENT: 'sandbox',
+      ONSWITCH_SANDBOX_SERVICE_KEY: 'sandbox-secret-not-real',
+      ONSWITCH_DATA_ENCRYPTION_KEY: 'e'.repeat(64),
+      ONSWITCH_IDEMPOTENCY_SECRET: 'idempotency-secret-with-at-least-32-chars',
+    })
+    const flow = new OnSwitchPaymentFlowService(
+      {} as OnSwitchClient,
+      {} as OnSwitchCatalogueService,
+      {} as OnSwitchPaymentRepository,
+      {} as OnSwitchPaymentsService,
+      {} as TradingRepository,
+      {} as WithdrawalIntentService,
+      sandboxOnMainnet,
+    )
+    await expect(
+      flow.createOfframpTransferIntent('user-id', 'payment-id', 'request-key'),
+    ).rejects.toMatchObject({ code: 'PAYMENT_SANDBOX_TRANSFER_DISABLED' })
+  })
+
+  it('enforces provider-advertised fiat amount limits without guessing textual limits', () => {
+    const corridor = { payoutLimits: { BANK: { min: '1000', max: '5000000' } } }
+    expect(() => assertCorridorAmountWithinLimits(corridor, 'BANK', '999')).toThrow(
+      /outside the provider’s current limit/,
+    )
+    expect(() => assertCorridorAmountWithinLimits(corridor, 'BANK', '5000001')).toThrow(
+      /outside the provider’s current limit/,
+    )
+    expect(() =>
+      assertCorridorAmountWithinLimits(
+        { payoutLimits: { BANK: 'Per transaction; see terms' } },
+        'BANK',
+        '25',
+      ),
+    ).not.toThrow()
+  })
+
   it('rejects a client-selected destination address in quote input', () => {
     expect(
       paymentQuoteInputSchema.safeParse({
@@ -121,6 +210,7 @@ describe('OnSwitch payment journeys', () => {
       requirements: vi.fn(async () => ({ data: [] })),
       requireAvailableSelection: vi.fn(async () => ({
         capabilities: { verifiedNetworks: ['arbitrum-one'] },
+        corridor: { payoutLimits: { BANK: { min: '1000', max: '5000000' } } },
         asset: {
           assetKey: 'arbitrum-one:usdc',
           networkId: 'arbitrum-one',
@@ -262,6 +352,7 @@ describe('OnSwitch payment journeys', () => {
     const catalogue = {
       requireAvailableSelection: vi.fn(async () => ({
         capabilities: { verifiedNetworks: ['arbitrum-one'] },
+        corridor: { payoutLimits: { BANK: { min: '1000', max: '5000000' } } },
         asset: {
           assetKey: 'arbitrum-one:usdc',
           networkId: 'arbitrum-one',

@@ -1,6 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { z } from 'zod'
 import type { OnSwitchRuntimeConfig } from '../../config/onswitch.js'
+import { increment } from '../../observability/metrics.js'
 import { AppError } from '../../utils/errors.js'
 import type { OnSwitchPaymentRepository } from './repository.js'
 
@@ -27,13 +28,17 @@ export class OnSwitchWebhookService {
     if (!this.config) throw new AppError('PAYMENTS_UNAVAILABLE', 'Payment callbacks are not enabled', 503)
     if (!Buffer.isBuffer(rawBody) || rawBody.length === 0 || rawBody.length > 128 * 1024)
       throw new AppError('WEBHOOK_INVALID_BODY', 'Webhook body is invalid', 400)
-    if (!signature || !/^[a-f0-9]{64}$/i.test(signature.trim()))
+    if (!signature || !/^[a-f0-9]{64}$/i.test(signature.trim())) {
+      increment('onswitch_webhook_signature_failures_total')
       throw new AppError('WEBHOOK_SIGNATURE_INVALID', 'Webhook signature is invalid', 401)
+    }
 
     const expected = createHmac('sha256', this.config.serviceKey).update(rawBody).digest()
     const provided = Buffer.from(signature.trim(), 'hex')
-    if (expected.length !== provided.length || !timingSafeEqual(expected, provided))
+    if (expected.length !== provided.length || !timingSafeEqual(expected, provided)) {
+      increment('onswitch_webhook_signature_failures_total')
       throw new AppError('WEBHOOK_SIGNATURE_INVALID', 'Webhook signature is invalid', 401)
+    }
 
     let payload: unknown
     try {
@@ -58,6 +63,7 @@ export class OnSwitchWebhookService {
       providerStatus: parsed.data.data.status.toUpperCase(),
       deliveryTimestamp: safeTimestamp,
     })
+    increment(result.duplicate ? 'onswitch_webhook_replays_total' : 'onswitch_webhook_events_accepted_total')
     return { accepted: true, duplicate: result.duplicate }
   }
 }

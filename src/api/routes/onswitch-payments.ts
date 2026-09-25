@@ -2,6 +2,7 @@ import { Router } from 'express'
 import rateLimit from 'express-rate-limit'
 import { z } from 'zod'
 import { requireIdentity } from '../../auth/middleware.js'
+import { userRateLimit } from '../middleware/userRateLimit.js'
 import type { OnSwitchCatalogueService } from '../../payments/onswitch/catalogue.js'
 import type { OnSwitchPaymentRepository } from '../../payments/onswitch/repository.js'
 import type { OnSwitchPaymentFlowService } from '../../payments/onswitch/journeys.js'
@@ -98,10 +99,24 @@ export function onSwitchPaymentsRouter(
     standardHeaders: 'draft-7',
     legacyHeaders: false,
   })
+  const auditRateLimit = (event: { userId: string; requestId?: string; category: string; route: string }) =>
+    payments.securityEvent({
+      userId: event.userId,
+      type: 'payment.onswitch.rate_limited',
+      outcome: 'denied',
+      ...(event.requestId ? { requestId: event.requestId } : {}),
+      metadata: { category: event.category, route: event.route },
+    })
+  const catalogueUserLimit = userRateLimit({ windowMs: 60_000, limit: 60 }, auditRateLimit)
+  const lookupUserLimit = userRateLimit({ windowMs: 10 * 60_000, limit: 10 }, auditRateLimit)
+  const quoteFlowUserLimit = userRateLimit({ windowMs: 60_000, limit: 10 }, auditRateLimit)
+  const initiateUserLimit = userRateLimit({ windowMs: 10 * 60_000, limit: 4 }, auditRateLimit)
+  const statusUserLimit = userRateLimit({ windowMs: 60_000, limit: 10 }, auditRateLimit)
 
   router.get(
     '/payments/capabilities',
     catalogueLimit,
+    catalogueUserLimit,
     asyncHandler(async (request, response) => {
       response.json({ success: true, data: await catalogue.capabilities(requireIdentity(request).userId) })
     }),
@@ -109,6 +124,7 @@ export function onSwitchPaymentsRouter(
   router.get(
     '/payments/requirements',
     catalogueLimit,
+    catalogueUserLimit,
     asyncHandler(async (request, response) => {
       const input = paymentRequirementsQuerySchema.parse(request.query)
       response.json({ success: true, data: await catalogue.requirements(input) })
@@ -117,6 +133,7 @@ export function onSwitchPaymentsRouter(
   router.get(
     '/payments/institutions',
     catalogueLimit,
+    catalogueUserLimit,
     asyncHandler(async (request, response) => {
       const input = paymentInstitutionsQuerySchema.parse(request.query)
       response.json({ success: true, data: await catalogue.institutions(input) })
@@ -125,6 +142,7 @@ export function onSwitchPaymentsRouter(
   router.post(
     '/payments/institutions/lookup',
     lookupLimit,
+    lookupUserLimit,
     asyncHandler(async (request, response) => {
       const input = institutionLookupBodySchema.parse(request.body)
       // Account numbers are only forwarded in memory for this lookup. Never
@@ -134,6 +152,8 @@ export function onSwitchPaymentsRouter(
   )
   router.get(
     '/payments/beneficiaries',
+    catalogueLimit,
+    catalogueUserLimit,
     asyncHandler(async (request, response) => {
       const references = await catalogue.beneficiaryReferences(requireIdentity(request).userId)
       response.json({
@@ -153,6 +173,7 @@ export function onSwitchPaymentsRouter(
   router.get(
     '/payments/beneficiaries/:beneficiaryId/refresh',
     catalogueLimit,
+    catalogueUserLimit,
     asyncHandler(async (request, response) => {
       const beneficiaryId = z.string().uuid().parse(request.params.beneficiaryId)
       response.json({
@@ -163,6 +184,8 @@ export function onSwitchPaymentsRouter(
   )
   router.get(
     '/payments',
+    statusLimit,
+    statusUserLimit,
     asyncHandler(async (request, response) => {
       const query = paymentHistoryQuerySchema.parse(request.query)
       const cursor = query.cursor ? decodeCursor(query.cursor) : undefined
@@ -188,6 +211,7 @@ export function onSwitchPaymentsRouter(
     router.post(
       '/payments/onramp/quotes',
       quoteFlowLimit,
+      quoteFlowUserLimit,
       asyncHandler(async (request, response) => {
         const input = paymentQuoteInputSchema.parse(request.body)
         response.status(201).json({
@@ -199,6 +223,7 @@ export function onSwitchPaymentsRouter(
     router.post(
       '/payments/offramp/quotes',
       quoteFlowLimit,
+      quoteFlowUserLimit,
       asyncHandler(async (request, response) => {
         const input = paymentQuoteInputSchema.parse(request.body)
         response.status(201).json({
@@ -210,6 +235,7 @@ export function onSwitchPaymentsRouter(
     router.post(
       '/payments/onramp/quotes/:quoteId/initiate',
       initiateLimit,
+      initiateUserLimit,
       asyncHandler(async (request, response) => {
         const quoteId = z.string().uuid().parse(request.params.quoteId)
         const input = onrampInitiateInputSchema.parse(request.body)
@@ -220,6 +246,7 @@ export function onSwitchPaymentsRouter(
     router.post(
       '/payments/offramp/quotes/:quoteId/initiate',
       initiateLimit,
+      initiateUserLimit,
       asyncHandler(async (request, response) => {
         const quoteId = z.string().uuid().parse(request.params.quoteId)
         const input = offrampInitiateInputSchema.parse(request.body)
@@ -230,6 +257,7 @@ export function onSwitchPaymentsRouter(
     router.post(
       '/payments/:paymentId/transfer-intents',
       initiateLimit,
+      initiateUserLimit,
       asyncHandler(async (request, response) => {
         const paymentId = z.string().uuid().parse(request.params.paymentId)
         const input = z
@@ -247,6 +275,7 @@ export function onSwitchPaymentsRouter(
     router.post(
       '/payments/:paymentId/refresh',
       statusLimit,
+      statusUserLimit,
       asyncHandler(async (request, response) => {
         const paymentId = z.string().uuid().parse(request.params.paymentId)
         response.json({
@@ -258,6 +287,8 @@ export function onSwitchPaymentsRouter(
   }
   router.get(
     '/payments/:paymentId',
+    statusLimit,
+    statusUserLimit,
     asyncHandler(async (request, response) => {
       const paymentId = z.string().uuid().parse(request.params.paymentId)
       const payment = await payments.getForUser(requireIdentity(request).userId, paymentId)

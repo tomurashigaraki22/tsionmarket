@@ -128,20 +128,28 @@ export class OnSwitchCatalogueService {
     const verified = new Set(verifiedNetworks.filter((id) => enabledByMode.has(id)))
     const coverageOn = onramp.data
     const coverageOff = offramp.data
+    const onrampStartsEnabled = this.environment.ONSWITCH_ONRAMP_STARTS_ENABLED
+    const offrampStartsEnabled = this.environment.ONSWITCH_OFFRAMP_STARTS_ENABLED
     const assets = providerAssets.data
       .map((asset) => mapTrustedAsset(asset, verified))
       .filter((asset): asset is NonNullable<typeof asset> => asset !== null)
       .map((asset) => ({
         ...asset,
         onrampAvailable:
-          asset.providerOnramp && coverageOn.some((corridor) => corridor.directions.includes('ONRAMP')),
+          onrampStartsEnabled &&
+          asset.providerOnramp &&
+          coverageOn.some((corridor) => corridor.directions.includes('ONRAMP')),
         offrampAvailable:
-          asset.providerOfframp && coverageOff.some((corridor) => corridor.directions.includes('OFFRAMP')),
+          offrampStartsEnabled &&
+          asset.providerOfframp &&
+          coverageOff.some((corridor) => corridor.directions.includes('OFFRAMP')),
       }))
       .filter((asset) => asset.onrampAvailable || asset.offrampAvailable)
 
     return {
       enabled: true,
+      onrampStartsEnabled,
+      offrampStartsEnabled,
       asOf: minIso(onramp.asOf, offramp.asOf, providerAssets.asOf),
       stale: onramp.stale || offramp.stale || providerAssets.stale,
       verifiedNetworks: [...verified],
@@ -162,15 +170,25 @@ export class OnSwitchCatalogueService {
     if (capabilities.stale)
       throw new AppError('PAYMENT_CATALOGUE_STALE', 'Payment options are refreshing; try again shortly', 503)
     const direction = input.operationType === 'onramp' ? 'ONRAMP' : 'OFFRAMP'
+    const startsEnabled =
+      input.operationType === 'onramp'
+        ? this.environment.ONSWITCH_ONRAMP_STARTS_ENABLED
+        : this.environment.ONSWITCH_OFFRAMP_STARTS_ENABLED
+    if (!startsEnabled)
+      throw new AppError(
+        'PAYMENT_DIRECTION_PAUSED',
+        'New payments in this direction are temporarily paused. Existing payments remain available.',
+        503,
+      )
     const corridors = direction === 'ONRAMP' ? capabilities.coverage.onramp : capabilities.coverage.offramp
-    const supportedCorridor = corridors.some(
+    const corridor = corridors.find(
       (corridor) =>
         corridor.country === input.country &&
         corridor.currencies.includes(input.currency) &&
         corridor.channels.includes(input.channel) &&
         corridor.directions.includes(direction),
     )
-    if (!supportedCorridor)
+    if (!corridor)
       throw new AppError('PAYMENT_CORRIDOR_UNSUPPORTED', 'This payment route is not currently supported', 400)
     const asset = capabilities.assets.find((item) => item.assetKey === input.assetKey)
     const supported =
@@ -181,7 +199,7 @@ export class OnSwitchCatalogueService {
         'This stablecoin is not available for this wallet and route',
         400,
       )
-    return { capabilities, asset }
+    return { capabilities, asset, corridor }
   }
 
   async requirements(input: {

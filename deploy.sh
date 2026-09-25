@@ -99,9 +99,13 @@ LIFI_API_KEY=
 # In production, use only a rotated live key from the deployment secret store.
 ONSWITCH_ENABLED=false
 ONSWITCH_ENVIRONMENT=live
+ONSWITCH_ONRAMP_STARTS_ENABLED=true
+ONSWITCH_OFFRAMP_STARTS_ENABLED=true
 ONSWITCH_SANDBOX_SERVICE_KEY=
 ONSWITCH_LIVE_SERVICE_KEY=
 ONSWITCH_IDEMPOTENCY_SECRET=
+ONSWITCH_DATA_ENCRYPTION_KEY=$(openssl rand -hex 32)
+ONSWITCH_MAX_ACTIVE_OPERATIONS_PER_USER=5
 ONSWITCH_TIMEOUT_MS=10000
 ONSWITCH_CATALOGUE_TTL_SECONDS=900
 ONSWITCH_WORKER_INTERVAL_SECONDS=20
@@ -123,11 +127,13 @@ Before deploying, edit it and set:
   AUTH_SMTP_USER / _FROM        adjust if your mailbox is not no-reply@
   *_RPC_URLS                    mainnet RPC endpoints
 
-OnSwitch remains disabled by default. Do not enable it until the integration,
-provider onboarding, and corridor approval are complete. Store any provider key
-only in deploy/.env or a secret manager; sandbox keys must never be used in
-production. Set a separate random ONSWITCH_IDEMPOTENCY_SECRET (at least 32
-characters) before enabling sandbox or live payments.
+OnSwitch remains disabled in this production stack. Sandbox testing requires
+a separate non-production deployment (NODE_ENV=staging) and isolated database;
+see docs/runbooks/onswitch-sandbox.md. Store any provider key only in deploy/.env
+or a secret manager; sandbox keys must never be used in production. Set a
+separate random ONSWITCH_IDEMPOTENCY_SECRET (at least 32 characters) before
+enabling payments. Keep the generated ONSWITCH_DATA_ENCRYPTION_KEY backed up
+with restricted access; losing it makes pending payment instructions unreadable.
 
 Then point DNS at this server and run ./deploy.sh again.
 EOF
