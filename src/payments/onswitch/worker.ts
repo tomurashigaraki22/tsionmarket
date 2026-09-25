@@ -6,6 +6,7 @@ import { OnSwitchClientError } from './client.js'
 import type { OnSwitchClient } from './client.js'
 import { retryDelayMs } from './repository.js'
 import type { OnSwitchPaymentRepository } from './repository.js'
+import { normalizePaymentStatusSnapshot } from './journeys.js'
 
 const statusResponseSchema = z.object({
   reference: z.string().uuid(),
@@ -49,6 +50,7 @@ export class OnSwitchWorker {
         this.environment.ONSWITCH_WORKER_LOCK_SECONDS,
       )
       increment('onswitch_webhook_events_processed_total', webhookCount)
+      await this.linkConfirmedTransferIntents()
       await this.confirmDueOperations()
       await this.reconcileDueOperations()
     } catch (error) {
@@ -57,6 +59,26 @@ export class OnSwitchWorker {
       })
     } finally {
       this.running = false
+    }
+  }
+
+  private async linkConfirmedTransferIntents(): Promise<void> {
+    const links = await this.repository.findConfirmedTransferLinks(
+      this.environment.ONSWITCH_WORKER_BATCH_SIZE,
+    )
+    for (const link of links) {
+      try {
+        await this.repository.linkConfirmedChainTransaction(
+          link.userId,
+          link.paymentId,
+          link.transactionRecordId,
+        )
+      } catch (error) {
+        logger.warn('OnSwitch confirmed wallet transfer could not be linked', {
+          paymentId: link.paymentId,
+          errorCode: workerErrorCode(error),
+        })
+      }
     }
   }
 
@@ -111,12 +133,19 @@ export class OnSwitchWorker {
         const status = statusResponseSchema.safeParse(response.data)
         if (!status.success || status.data.reference !== record.providerReference)
           throw new Error('INVALID_PROVIDER_STATUS')
+        const payment = await this.repository.getForWorker(record.operationId)
+        if (!payment) throw new Error('PAYMENT_REFERENCE_MISSING')
+        const snapshot = normalizePaymentStatusSnapshot(response.data, payment.operationType, payment.terms)
+        const needsDepositInstructions =
+          status.data.status.toUpperCase() === 'AWAITING_DEPOSIT' && !payment.instructions && !snapshot
         await this.repository.recordReconciliation({
           operationId: record.operationId,
-          providerStatus: status.data.status,
+          ...(needsDepositInstructions ? {} : { providerStatus: status.data.status }),
           attempt,
           maxAttempts: this.environment.ONSWITCH_WORKER_MAX_ATTEMPTS,
           retryAt: new Date(this.now().getTime() + retryDelayMs(attempt)),
+          ...(snapshot ?? {}),
+          ...(needsDepositInstructions ? { failureCode: 'STATUS_DETAILS_INVALID' } : {}),
         })
         increment('onswitch_reconciliations_total')
       } catch (error) {

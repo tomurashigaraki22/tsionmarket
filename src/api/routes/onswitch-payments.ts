@@ -4,6 +4,12 @@ import { z } from 'zod'
 import { requireIdentity } from '../../auth/middleware.js'
 import type { OnSwitchCatalogueService } from '../../payments/onswitch/catalogue.js'
 import type { OnSwitchPaymentRepository } from '../../payments/onswitch/repository.js'
+import type { OnSwitchPaymentFlowService } from '../../payments/onswitch/journeys.js'
+import {
+  offrampInitiateInputSchema,
+  onrampInitiateInputSchema,
+  paymentQuoteInputSchema,
+} from '../../payments/onswitch/journeys.js'
 import { asyncHandler } from '../../utils/asyncHandler.js'
 import { AppError } from '../../utils/errors.js'
 
@@ -59,6 +65,7 @@ const decodedCursorSchema = z.object({ createdAt: z.string().datetime(), id: z.s
 export function onSwitchPaymentsRouter(
   catalogue: OnSwitchCatalogueService,
   payments: OnSwitchPaymentRepository,
+  flows?: OnSwitchPaymentFlowService,
 ) {
   const router = Router()
   const catalogueLimit = rateLimit({
@@ -70,6 +77,24 @@ export function onSwitchPaymentsRouter(
   const lookupLimit = rateLimit({
     windowMs: 10 * 60_000,
     limit: 20,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+  })
+  const quoteFlowLimit = rateLimit({
+    windowMs: 60_000,
+    limit: 15,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+  })
+  const initiateLimit = rateLimit({
+    windowMs: 10 * 60_000,
+    limit: 8,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+  })
+  const statusLimit = rateLimit({
+    windowMs: 60_000,
+    limit: 10,
     standardHeaders: 'draft-7',
     legacyHeaders: false,
   })
@@ -159,6 +184,78 @@ export function onSwitchPaymentsRouter(
       })
     }),
   )
+  if (flows) {
+    router.post(
+      '/payments/onramp/quotes',
+      quoteFlowLimit,
+      asyncHandler(async (request, response) => {
+        const input = paymentQuoteInputSchema.parse(request.body)
+        response.status(201).json({
+          success: true,
+          data: await flows.quote(requireIdentity(request).userId, 'onramp', input),
+        })
+      }),
+    )
+    router.post(
+      '/payments/offramp/quotes',
+      quoteFlowLimit,
+      asyncHandler(async (request, response) => {
+        const input = paymentQuoteInputSchema.parse(request.body)
+        response.status(201).json({
+          success: true,
+          data: await flows.quote(requireIdentity(request).userId, 'offramp', input),
+        })
+      }),
+    )
+    router.post(
+      '/payments/onramp/quotes/:quoteId/initiate',
+      initiateLimit,
+      asyncHandler(async (request, response) => {
+        const quoteId = z.string().uuid().parse(request.params.quoteId)
+        const input = onrampInitiateInputSchema.parse(request.body)
+        const result = await flows.initiateOnramp(requireIdentity(request).userId, quoteId, input)
+        response.status(result.existing ? 200 : 201).json({ success: true, data: result })
+      }),
+    )
+    router.post(
+      '/payments/offramp/quotes/:quoteId/initiate',
+      initiateLimit,
+      asyncHandler(async (request, response) => {
+        const quoteId = z.string().uuid().parse(request.params.quoteId)
+        const input = offrampInitiateInputSchema.parse(request.body)
+        const result = await flows.initiateOfframp(requireIdentity(request).userId, quoteId, input)
+        response.status(result.existing ? 200 : 201).json({ success: true, data: result })
+      }),
+    )
+    router.post(
+      '/payments/:paymentId/transfer-intents',
+      initiateLimit,
+      asyncHandler(async (request, response) => {
+        const paymentId = z.string().uuid().parse(request.params.paymentId)
+        const input = z
+          .object({ idempotencyKey: z.string().min(8).max(200) })
+          .strict()
+          .parse(request.body)
+        const result = await flows.createOfframpTransferIntent(
+          requireIdentity(request).userId,
+          paymentId,
+          input.idempotencyKey,
+        )
+        response.status(result.existing ? 200 : 201).json({ success: true, data: result })
+      }),
+    )
+    router.post(
+      '/payments/:paymentId/refresh',
+      statusLimit,
+      asyncHandler(async (request, response) => {
+        const paymentId = z.string().uuid().parse(request.params.paymentId)
+        response.json({
+          success: true,
+          data: await flows.refresh(requireIdentity(request).userId, paymentId),
+        })
+      }),
+    )
+  }
   router.get(
     '/payments/:paymentId',
     asyncHandler(async (request, response) => {

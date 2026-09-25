@@ -44,6 +44,7 @@ import type { WithdrawalIntentService } from './trading/WithdrawalIntentService.
 import type { OnSwitchPaymentRepository } from './payments/onswitch/repository.js'
 import type { OnSwitchCatalogueService } from './payments/onswitch/catalogue.js'
 import type { OnSwitchWebhookService } from './payments/onswitch/webhook.js'
+import type { OnSwitchPaymentFlowService } from './payments/onswitch/journeys.js'
 import { onSwitchWebhookRouter } from './api/routes/onswitch-webhook.js'
 import { onSwitchPaymentsRouter } from './api/routes/onswitch-payments.js'
 
@@ -72,6 +73,7 @@ export type AppDependencies = {
   onSwitchPaymentRepository?: OnSwitchPaymentRepository
   onSwitchCatalogue?: OnSwitchCatalogueService
   onSwitchWebhook?: OnSwitchWebhookService
+  onSwitchPaymentFlows?: OnSwitchPaymentFlowService
 }
 
 export function createApp({
@@ -99,6 +101,7 @@ export function createApp({
   onSwitchPaymentRepository,
   onSwitchCatalogue,
   onSwitchWebhook,
+  onSwitchPaymentFlows,
 }: AppDependencies): Express {
   const app = express()
   app.disable('x-powered-by')
@@ -167,7 +170,10 @@ export function createApp({
     if (transactionService && transactionRepository)
       app.use('/v1', transactionsRouter(transactionService, transactionRepository))
     if (environment.ONSWITCH_ENABLED && onSwitchPaymentRepository && onSwitchCatalogue)
-      app.use('/v1', onSwitchPaymentsRouter(onSwitchCatalogue, onSwitchPaymentRepository))
+      app.use(
+        '/v1',
+        onSwitchPaymentsRouter(onSwitchCatalogue, onSwitchPaymentRepository, onSwitchPaymentFlows),
+      )
     if (valuationService && transactionRepository)
       app.use('/v1', phase12Router(valuationService, transactionRepository))
     if (roundRepository && arcadeLimits && depositIntents)

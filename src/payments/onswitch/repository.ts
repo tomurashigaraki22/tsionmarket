@@ -26,6 +26,10 @@ export type PaymentOperationInput = {
   assetKey?: string | undefined
   sourceAmount?: string | undefined
   destinationAmount?: string | undefined
+  sourceAmountRaw?: string | undefined
+  destinationAmountRaw?: string | undefined
+  sourceDecimals?: number | undefined
+  destinationDecimals?: number | undefined
   termsSnapshot?: Record<string, unknown> | undefined
   expiresAt?: Date | undefined
 }
@@ -40,6 +44,10 @@ export type PaymentQuoteInput = {
   assetKey?: string | undefined
   sourceAmount?: string | undefined
   destinationAmount?: string | undefined
+  sourceAmountRaw?: string | undefined
+  destinationAmountRaw?: string | undefined
+  sourceDecimals?: number | undefined
+  destinationDecimals?: number | undefined
   rate?: string | undefined
   feeAmount?: string | undefined
   termsSnapshot: Record<string, unknown>
@@ -84,7 +92,9 @@ type OperationRow = RowDataPacket & {
 }
 
 type PaymentQuoteRow = RowDataPacket & {
+  id: string
   operationType: PaymentOperationType
+  termsSnapshot: unknown
   expiresAt: string | Date
   consumedAt: string | Date | null
 }
@@ -151,8 +161,9 @@ export class OnSwitchPaymentRepository {
     await this.pool.execute(
       `INSERT INTO payment_quotes
        (id,user_id,operation_type,request_fingerprint,country,fiat_currency,channel,asset_key,
-        source_amount,destination_amount,rate,fee_amount,terms_snapshot,expires_at)
-       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        source_amount,destination_amount,source_amount_raw,destination_amount_raw,source_decimals,
+        destination_decimals,rate,fee_amount,terms_snapshot,expires_at)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         id,
         input.userId,
@@ -164,6 +175,10 @@ export class OnSwitchPaymentRepository {
         input.assetKey ?? null,
         input.sourceAmount ?? null,
         input.destinationAmount ?? null,
+        input.sourceAmountRaw ?? null,
+        input.destinationAmountRaw ?? null,
+        input.sourceDecimals ?? null,
+        input.destinationDecimals ?? null,
         input.rate ?? null,
         input.feeAmount ?? null,
         JSON.stringify(input.termsSnapshot),
@@ -171,6 +186,34 @@ export class OnSwitchPaymentRepository {
       ],
     )
     return id
+  }
+
+  async getQuoteForUser(userId: string, quoteId: string) {
+    const [rows] = await this.pool.execute<PaymentQuoteRow[]>(
+      `SELECT id,operation_type AS operationType,terms_snapshot AS termsSnapshot,
+       expires_at AS expiresAt,consumed_at AS consumedAt
+       FROM payment_quotes WHERE id=? AND user_id=?`,
+      [quoteId, userId],
+    )
+    const row = rows[0]
+    if (!row) return null
+    return {
+      id: String(row.id),
+      operationType: row.operationType,
+      terms: decodeJson(row.termsSnapshot),
+      expiresAt: fromMysqlDateTime(row.expiresAt),
+      consumedAt: row.consumedAt ? fromMysqlDateTime(row.consumedAt) : null,
+    }
+  }
+
+  async findOperationByIdempotency(userId: string, idempotencyKey: string) {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT id,request_fingerprint AS requestFingerprint FROM payment_operations
+       WHERE user_id=? AND idempotency_key=?`,
+      [userId, idempotencyKey],
+    )
+    const row = rows[0]
+    return row ? { id: String(row.id), requestFingerprint: String(row.requestFingerprint) } : null
   }
 
   async createOperation(input: PaymentOperationInput): Promise<{ id: string; existing: boolean }> {
@@ -228,8 +271,9 @@ export class OnSwitchPaymentRepository {
           `INSERT INTO payment_operations
            (id,user_id,quote_id,beneficiary_ref_id,account_id,network_id,operation_type,status,
             idempotency_key,request_fingerprint,country,fiat_currency,channel,asset_key,source_amount,
-            destination_amount,terms_snapshot,expires_at,next_reconcile_at)
-           VALUES(?,?,?,?,?,?,?,'created',?,?,?,?,?,?,?,?,?,?,DATE_ADD(NOW(6), INTERVAL 20 SECOND))`,
+            destination_amount,source_amount_raw,destination_amount_raw,source_decimals,destination_decimals,
+            terms_snapshot,expires_at,next_reconcile_at)
+           VALUES(?,?,?,?,?,?,?,'created',?,?,?,?,?,?,?,?,?,?,?,?,DATE_ADD(NOW(6), INTERVAL 20 SECOND))`,
           [
             id,
             input.userId,
@@ -246,6 +290,10 @@ export class OnSwitchPaymentRepository {
             input.assetKey ?? null,
             input.sourceAmount ?? null,
             input.destinationAmount ?? null,
+            input.sourceAmountRaw ?? null,
+            input.destinationAmountRaw ?? null,
+            input.sourceDecimals ?? null,
+            input.destinationDecimals ?? null,
             input.termsSnapshot ? JSON.stringify(input.termsSnapshot) : null,
             input.expiresAt ?? null,
           ],
@@ -299,6 +347,233 @@ export class OnSwitchPaymentRepository {
     }
   }
 
+  async beginInitiation(operationId: string): Promise<boolean> {
+    return await withTransaction(this.pool, async (connection) => {
+      const [rows] = await connection.execute<RowDataPacket[]>(
+        `SELECT status,provider_reference AS providerReference FROM payment_operations
+         WHERE id=? AND provider='onswitch' FOR UPDATE`,
+        [operationId],
+      )
+      const row = rows[0]
+      if (!row) throw new AppError('PAYMENT_NOT_FOUND', 'Payment operation not found', 404)
+      if (String(row.status) !== 'created') return false
+      const reference = String(row.providerReference ?? operationId)
+      await connection.execute(
+        `UPDATE payment_operations SET status='initiating',provider_reference=?,
+         next_reconcile_at=DATE_ADD(NOW(6),INTERVAL 20 SECOND),last_error_code=NULL WHERE id=?`,
+        [reference, operationId],
+      )
+      await connection.execute(
+        `INSERT INTO payment_state_transitions(payment_operation_id,from_status,to_status,source)
+         VALUES(?,'created','initiating','local')`,
+        [operationId],
+      )
+      return true
+    })
+  }
+
+  async completeInitiation(input: {
+    operationId: string
+    providerReference: string
+    providerStatus: string
+    operationType: PaymentOperationType
+    instructions: Record<string, unknown>
+    terms: Record<string, unknown>
+    expiresAt: Date | null
+  }): Promise<void> {
+    await withTransaction(this.pool, async (connection) => {
+      const [rows] = await connection.execute<RowDataPacket[]>(
+        `SELECT status,provider_reference AS providerReference FROM payment_operations
+         WHERE id=? AND provider='onswitch' FOR UPDATE`,
+        [input.operationId],
+      )
+      const row = rows[0]
+      if (!row) throw new AppError('PAYMENT_NOT_FOUND', 'Payment operation not found', 404)
+      if (String(row.providerReference) !== input.providerReference) {
+        if (String(row.providerReference) !== input.operationId)
+          throw new AppError(
+            'PAYMENT_REFERENCE_CONFLICT',
+            'Provider reference does not match this operation',
+            409,
+          )
+        await connection.execute(
+          `UPDATE payment_operations SET provider_reference=? WHERE id=? AND provider_reference=?`,
+          [input.providerReference, input.operationId, input.operationId],
+        )
+      }
+      const before = String(row.status) as PaymentStatus
+      const next = normalizeProviderStatus(input.providerStatus, input.operationType)
+      if (before !== next && !canTransitionPayment(before, next))
+        throw new AppError('PAYMENT_STATE_CONFLICT', 'Provider returned an invalid payment state', 409)
+      await connection.execute(
+        `UPDATE payment_operations SET status=?,provider_status=?,safe_instructions=?,terms_snapshot=?,
+         expires_at=?,last_error_code=NULL,reconcile_attempts=0,next_reconcile_at=?,
+         completed_at=IF(?='completed',COALESCE(completed_at,NOW(6)),completed_at) WHERE id=?`,
+        [
+          next,
+          input.providerStatus,
+          JSON.stringify(input.instructions),
+          JSON.stringify(input.terms),
+          input.expiresAt,
+          isPaymentTerminal(next) ? null : new Date(Date.now() + 20_000),
+          next,
+          input.operationId,
+        ],
+      )
+      if (before !== next)
+        await connection.execute(
+          `INSERT INTO payment_state_transitions(payment_operation_id,from_status,to_status,source,provider_status)
+           VALUES(?,?,?,'local',?)`,
+          [input.operationId, before, next, input.providerStatus],
+        )
+    })
+  }
+
+  async recordInitiationFailure(operationId: string, code: string, ambiguous: boolean): Promise<void> {
+    await withTransaction(this.pool, async (connection) => {
+      const [rows] = await connection.execute<RowDataPacket[]>(
+        'SELECT status FROM payment_operations WHERE id=? FOR UPDATE',
+        [operationId],
+      )
+      const row = rows[0]
+      if (!row || String(row.status) !== 'initiating') return
+      const next: PaymentStatus = ambiguous ? 'unknown' : 'failed'
+      await connection.execute(
+        `UPDATE payment_operations SET status=?,last_error_code=?,
+         next_reconcile_at=IF(?='unknown',NOW(6),NULL),reconcile_attempts=0 WHERE id=?`,
+        [next, code.slice(0, 64), next, operationId],
+      )
+      await connection.execute(
+        `INSERT INTO payment_state_transitions(payment_operation_id,from_status,to_status,source)
+         VALUES(?,? ,?,'local')`,
+        [operationId, 'initiating', next],
+      )
+    })
+  }
+
+  async bindTransferIntent(userId: string, paymentId: string, intentId: string): Promise<void> {
+    await withTransaction(this.pool, async (connection) => {
+      const [payments] = await connection.execute<RowDataPacket[]>(
+        `SELECT operation_type AS operationType,status,account_id AS accountId,network_id AS networkId,
+         transaction_intent_id AS transactionIntentId,expires_at AS expiresAt
+         FROM payment_operations WHERE id=? AND user_id=? FOR UPDATE`,
+        [paymentId, userId],
+      )
+      const payment = payments[0]
+      if (!payment || String(payment.operationType) !== 'offramp')
+        throw new AppError('PAYMENT_NOT_FOUND', 'Off-ramp payment not found', 404)
+      if (payment.transactionIntentId) {
+        if (String(payment.transactionIntentId) === intentId) return
+        throw new AppError(
+          'PAYMENT_TRANSFER_CONFLICT',
+          'A transfer intent is already bound to this payment',
+          409,
+        )
+      }
+      if (String(payment.status) !== 'awaiting_chain')
+        throw new AppError(
+          'PAYMENT_NOT_READY_FOR_TRANSFER',
+          'Payment is not waiting for a wallet transfer',
+          409,
+        )
+      if (payment.expiresAt && fromMysqlDateTime(payment.expiresAt as string | Date).getTime() <= Date.now())
+        throw new AppError('PAYMENT_DEPOSIT_EXPIRED', 'The provider deposit instructions have expired', 409)
+      const [intents] = await connection.execute<RowDataPacket[]>(
+        `SELECT account_id AS accountId,network_id AS networkId,status,intent_type AS intentType,
+         normalized_summary AS summary
+         FROM transaction_intents WHERE id=? AND user_id=? FOR UPDATE`,
+        [intentId, userId],
+      )
+      const intent = intents[0]
+      const summary = intent ? (decodeJson(intent.summary) as Record<string, unknown>) : null
+      if (
+        !intent ||
+        String(intent.status) !== 'awaiting_signature' ||
+        String(intent.accountId) !== String(payment.accountId) ||
+        String(intent.networkId) !== String(payment.networkId) ||
+        String(intent.intentType) !== 'payment_transfer' ||
+        summary?.paymentOperationId !== paymentId
+      )
+        throw new AppError(
+          'PAYMENT_TRANSFER_INTENT_INVALID',
+          'Transfer intent does not match this payment',
+          409,
+        )
+      await connection.execute(
+        'UPDATE payment_operations SET transaction_intent_id=? WHERE id=? AND user_id=?',
+        [intentId, paymentId, userId],
+      )
+    })
+  }
+
+  async findConfirmedTransferLinks(limit: number): Promise<
+    Array<{
+      userId: string
+      paymentId: string
+      transactionRecordId: string
+    }>
+  > {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT p.user_id AS userId,p.id AS paymentId,r.id AS transactionRecordId
+       FROM payment_operations p JOIN transaction_records r ON r.intent_id=p.transaction_intent_id
+       WHERE p.operation_type='offramp' AND p.status='awaiting_chain'
+       AND p.transaction_intent_id IS NOT NULL AND p.chain_tx_hash IS NULL AND r.status='confirmed'
+       ORDER BY r.confirmed_at ASC LIMIT ?`,
+      [limit],
+    )
+    return rows.map((row) => ({
+      userId: String(row.userId),
+      paymentId: String(row.paymentId),
+      transactionRecordId: String(row.transactionRecordId),
+    }))
+  }
+
+  async applyProviderStatus(
+    operationId: string,
+    providerStatus: string,
+    snapshot?: {
+      instructions: Record<string, unknown>
+      terms: Record<string, unknown>
+      expiresAt: Date | null
+    },
+  ): Promise<void> {
+    await withTransaction(this.pool, async (connection) => {
+      const [rows] = await connection.execute<RowDataPacket[]>(
+        `SELECT status,operation_type AS operationType FROM payment_operations WHERE id=? FOR UPDATE`,
+        [operationId],
+      )
+      const row = rows[0]
+      if (!row) throw new AppError('PAYMENT_NOT_FOUND', 'Payment not found', 404)
+      const before = String(row.status) as PaymentStatus
+      const next = mapProviderStatus(providerStatus, String(row.operationType) as PaymentOperationType)
+      if (before !== next && !canTransitionPayment(before, next)) return
+      await connection.execute(
+        `UPDATE payment_operations SET status=?,provider_status=?,last_error_code=NULL,
+         safe_instructions=COALESCE(?,safe_instructions),terms_snapshot=COALESCE(?,terms_snapshot),
+         expires_at=COALESCE(?,expires_at),
+         reconcile_attempts=0,reconcile_lock_until=NULL,
+         next_reconcile_at=?,completed_at=IF(?='completed',COALESCE(completed_at,NOW(6)),completed_at)
+         WHERE id=?`,
+        [
+          next,
+          providerStatus.slice(0, 40),
+          snapshot ? JSON.stringify(snapshot.instructions) : null,
+          snapshot ? JSON.stringify(snapshot.terms) : null,
+          snapshot?.expiresAt ?? null,
+          isPaymentTerminal(next) ? null : new Date(Date.now() + 20_000),
+          next,
+          operationId,
+        ],
+      )
+      if (before !== next)
+        await connection.execute(
+          `INSERT INTO payment_state_transitions(payment_operation_id,from_status,to_status,source,provider_status)
+           VALUES(?,?,?,'reconciliation',?)`,
+          [operationId, before, next, providerStatus.slice(0, 40)],
+        )
+    })
+  }
+
   async linkConfirmedChainTransaction(
     userId: string,
     paymentId: string,
@@ -307,7 +582,7 @@ export class OnSwitchPaymentRepository {
     await withTransaction(this.pool, async (connection) => {
       const [payments] = await connection.execute<RowDataPacket[]>(
         `SELECT status,account_id AS accountId,network_id AS networkId,chain_tx_hash AS chainTxHash,
-                transaction_record_id AS transactionRecordId
+                transaction_intent_id AS transactionIntentId,transaction_record_id AS transactionRecordId
          FROM payment_operations WHERE id=? AND user_id=? AND operation_type='offramp' FOR UPDATE`,
         [paymentId, userId],
       )
@@ -320,14 +595,15 @@ export class OnSwitchPaymentRepository {
           'A different chain transfer is already linked',
           409,
         )
-      if (!payment.accountId || !payment.networkId)
+      if (!payment.accountId || !payment.networkId || !payment.transactionIntentId)
         throw new AppError('PAYMENT_ACCOUNT_UNAVAILABLE', 'Payment has no verified wallet account', 409)
 
       const [records] = await connection.execute<RowDataPacket[]>(
         `SELECT id,intent_id AS intentId,tx_hash AS txHash,account_id AS accountId,network_id AS networkId
          FROM transaction_records
-         WHERE id=? AND user_id=? AND status='confirmed' AND account_id=? AND network_id=? FOR UPDATE`,
-        [transactionRecordId, userId, payment.accountId, payment.networkId],
+         WHERE id=? AND user_id=? AND status='confirmed' AND account_id=? AND network_id=?
+         AND intent_id=? FOR UPDATE`,
+        [transactionRecordId, userId, payment.accountId, payment.networkId, payment.transactionIntentId],
       )
       const record = records[0]
       if (!record)
@@ -356,6 +632,11 @@ export class OnSwitchPaymentRepository {
       `${operationSelect} WHERE p.user_id=? AND p.id=?`,
       [userId, paymentId],
     )
+    return rows[0] ? mapOperation(rows[0]) : null
+  }
+
+  async getForWorker(paymentId: string) {
+    const [rows] = await this.pool.execute<OperationRow[]>(`${operationSelect} WHERE p.id=?`, [paymentId])
     return rows[0] ? mapOperation(rows[0]) : null
   }
 
@@ -442,7 +723,7 @@ export class OnSwitchPaymentRepository {
           [lockSeconds, attempts, eventId],
         )
         const [operations] = await connection.execute<RowDataPacket[]>(
-          'SELECT status FROM payment_operations WHERE id=? FOR UPDATE',
+          'SELECT status,operation_type AS operationType FROM payment_operations WHERE id=? FOR UPDATE',
           [operationId],
         )
         const current = operations[0]
@@ -451,7 +732,10 @@ export class OnSwitchPaymentRepository {
           continue
         }
         const before = String(current.status) as PaymentStatus
-        const next = mapProviderStatus(String(row.providerStatus))
+        const next = mapProviderStatus(
+          String(row.providerStatus),
+          String(current.operationType) as PaymentOperationType,
+        )
         if (before !== next && canTransitionPayment(before, next)) {
           await connection.execute(
             `UPDATE payment_operations SET status=?,provider_status=?,reconcile_attempts=0,
@@ -514,28 +798,38 @@ export class OnSwitchPaymentRepository {
     maxAttempts: number
     retryAt: Date
     failureCode?: string
+    instructions?: Record<string, unknown>
+    terms?: Record<string, unknown>
+    expiresAt?: Date | null
   }): Promise<void> {
     await withTransaction(this.pool, async (connection) => {
       const [rows] = await connection.execute<RowDataPacket[]>(
-        'SELECT status FROM payment_operations WHERE id=? FOR UPDATE',
+        'SELECT status,operation_type AS operationType FROM payment_operations WHERE id=? FOR UPDATE',
         [input.operationId],
       )
       const row = rows[0]
       if (!row) return
       const before = String(row.status) as PaymentStatus
       const providerStatus = input.providerStatus ?? null
-      let next = providerStatus ? mapProviderStatus(providerStatus) : before
+      let next = providerStatus
+        ? mapProviderStatus(providerStatus, String(row.operationType) as PaymentOperationType)
+        : before
       if (input.attempt >= input.maxAttempts && !isPaymentTerminal(next)) next = 'manual_review'
       const changed = before !== next && canTransitionPayment(before, next)
       if (changed) {
         await connection.execute(
           `UPDATE payment_operations SET status=?,provider_status=COALESCE(?,provider_status),last_error_code=?,
+           safe_instructions=COALESCE(?,safe_instructions),terms_snapshot=COALESCE(?,terms_snapshot),
+           expires_at=COALESCE(?,expires_at),
            reconcile_attempts=?,next_reconcile_at=?,reconcile_lock_until=NULL,
            completed_at=IF(?='completed',COALESCE(completed_at,NOW(6)),completed_at) WHERE id=?`,
           [
             next,
             providerStatus,
             input.failureCode ?? null,
+            input.instructions ? JSON.stringify(input.instructions) : null,
+            input.terms ? JSON.stringify(input.terms) : null,
+            input.expiresAt ?? null,
             input.attempt,
             isPaymentTerminal(next) ? null : input.retryAt,
             next,
@@ -549,11 +843,16 @@ export class OnSwitchPaymentRepository {
         )
       } else {
         await connection.execute(
-          `UPDATE payment_operations SET provider_status=COALESCE(?,provider_status),last_error_code=?,reconcile_attempts=?,
+          `UPDATE payment_operations SET provider_status=COALESCE(?,provider_status),last_error_code=?,
+           safe_instructions=COALESCE(?,safe_instructions),terms_snapshot=COALESCE(?,terms_snapshot),
+           expires_at=COALESCE(?,expires_at),reconcile_attempts=?,
            next_reconcile_at=?,reconcile_lock_until=NULL WHERE id=?`,
           [
             providerStatus,
             input.failureCode ?? null,
+            input.instructions ? JSON.stringify(input.instructions) : null,
+            input.terms ? JSON.stringify(input.terms) : null,
+            input.expiresAt ?? null,
             input.attempt,
             isPaymentTerminal(before) ? null : input.retryAt,
             input.operationId,
@@ -772,6 +1071,6 @@ export function retryDelayMs(attempt: number, baseMs = 10_000, ceilingMs = 30 * 
   return Math.min(baseMs * 2 ** Math.max(0, attempt - 1), ceilingMs)
 }
 
-function mapProviderStatus(value: string): PaymentStatus {
-  return normalizeProviderStatus(value)
+function mapProviderStatus(value: string, operationType?: PaymentOperationType): PaymentStatus {
+  return normalizeProviderStatus(value, operationType)
 }

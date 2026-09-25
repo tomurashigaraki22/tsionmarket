@@ -58,6 +58,24 @@ export class OnSwitchPaymentsService {
     })
   }
 
+  async findOperationReplay(
+    userId: string,
+    idempotencyKey: string,
+    operationType: PaymentOperationType,
+    fingerprintMaterial: Record<string, unknown>,
+  ): Promise<{ id: string } | null> {
+    this.assertFingerprintSecret()
+    const key = idempotencyKeySchema.safeParse(idempotencyKey)
+    if (!key.success)
+      throw new AppError('IDEMPOTENCY_KEY_INVALID', 'A valid idempotency key is required', 400)
+    const existing = await this.repository.findOperationByIdempotency(userId, key.data)
+    if (!existing) return null
+    const requestFingerprint = this.fingerprint({ ...fingerprintMaterial, operationType })
+    if (existing.requestFingerprint !== requestFingerprint)
+      throw new AppError('IDEMPOTENCY_CONFLICT', 'Idempotency key was used for another payment request', 409)
+    return { id: existing.id }
+  }
+
   private fingerprint(value: unknown): string {
     return createHmac('sha256', this.environment.ONSWITCH_IDEMPOTENCY_SECRET!)
       .update(canonicalJson(value))

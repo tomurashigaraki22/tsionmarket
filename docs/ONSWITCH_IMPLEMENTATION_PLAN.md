@@ -1,6 +1,6 @@
 # OnSwitch Payments — Implementation Plan
 
-- **Status:** Phases 1–3 backend foundations implemented; Phase 0 provider confirmations remain open; payment initiation and UI are not implemented
+- **Status:** Phases 1–5 backend code implemented; Phase 0 vendor/live-readiness confirmations remain open; frontend payment UI remains future work
 - **Last reviewed:** 25 September 2026
 - **Scope:** `tsionmarket` backend and `tsionmarket-frontend` only.
 - **Provider docs:** [docs.onswitch.xyz](https://docs.onswitch.xyz/introduction)
@@ -10,9 +10,9 @@
 - The backend `main` worktree is already aligned with `origin/main`; there are no other backend worktrees to merge.
 - The frontend Claude branch `claude/tsionark-landing-plan-5345ac` is an ancestor of frontend `main`. Its changes are already present on `main`; there is no additional Claude diff to pull.
 - The existing untracked `docs/SCRABBLE_IMPLEMENTATION_PLAN.md` is unrelated user work and must remain untouched.
-- This document records the implementation plan and execution status. Backend phases 1–3 are tracked in source; customer quote/initiation flows and payment UI remain future work. No provider credentials are stored here.
+- This document records the implementation plan and execution status. Backend quote/initiation journeys are in place for Phases 4–5; sandbox-to-live validation and payment UI remain future work. No provider credentials are stored here.
 
-## Phase 0–3 execution update — 25 September 2026
+## Phase 0–5 execution update — 25 September 2026
 
 ### Phase 0: local product and provider contract
 
@@ -54,7 +54,7 @@ Implemented in this change:
 - Added a bounded worker for inbox processing, off-ramp confirmation retries, provider status reconciliation, backoff, row locking, and manual-review ceilings. Callback and reconciliation transitions are idempotent and never credit balances.
 - Added user-scoped payment history/detail repository reads.
 
-**Phase 2 boundary:** No quote or initiation endpoint calls OnSwitch to start a customer payment yet. Provider reference/idempotency semantics remain an external Phase 0 gate; Phases 4–5 must resolve ambiguous initiation without blind retries. Migrations have not been applied or integration-tested against MySQL in this local environment. Retention/deletion policy and any encryption required for future payment instructions remain release work.
+**Phase 2 boundary:** Provider quote/initiation calls are now implemented in Phases 4–5. Provider reference/idempotency semantics still require sandbox confirmation; ambiguous initiation is recorded as unknown and queried by the supplied reference rather than blindly retried. Migrations have not been applied or integration-tested against MySQL in this local environment. Retention/deletion policy and any encryption required for future payment instructions remain release work.
 
 ### Phase 3: dynamic capabilities and beneficiary support foundation
 
@@ -255,6 +255,10 @@ This is a product normalization, not a claim that the provider exposes every loc
 
 ### Phase 4 — Fiat on-ramp (bank/mobile money → stablecoin)
 
+**Execution status — backend implemented; provider sandbox verification pending.** Authenticated quote, initiate, detail, and refresh routes are wired into the backend. The route derives the destination from the selected verified account, saves exact quote terms with a short expiry, re-quotes before initiation, returns a sanitized payment-instruction view, and uses a generated UUID reference. Mobile-money payer and dynamic beneficiary fields are checked against provider requirements. Retried idempotency keys return the stored operation instead of repeating the provider POST; ambiguous responses are stored as unknown and reconciled. The backend never credits wallet or trading balances.
+
+The implementation intentionally sends only the documented external-wallet beneficiary form and does not send the customer's account address as a client-provided destination. Provider instructions and safe quote data are persisted; beneficiary/payer form values are not stored in the operation. Quote JSON numbers are converted from exact decimal strings only after precision checks.
+
 **Work**
 
 - Implement quote and initiate service/routes using `/onramp/quote` and `/onramp/initiate` with server-validated local fiat amount, country/currency/channel, stablecoin asset, and verified destination wallet account.
@@ -270,7 +274,13 @@ This is a product normalization, not a claim that the provider exposes every loc
 - Wrong account/network, unverified address, unsupported stablecoin/corridor, altered amount, and user A fetching user B's payment are rejected.
 - No spendable balance or `COMPLETED` UI state is synthesized from just `AWAITING_DEPOSIT`/`PROCESSING`.
 
+**Local verification:** journey and lifecycle unit tests cover verified-wallet derivation, strict address-input rejection, status direction mapping, and on-ramp instruction persistence. A real provider sandbox journey, MySQL migration/integration test, and the frontend payment display are not verified in this environment.
+
 ### Phase 5 — Fiat off-ramp (stablecoin → bank/mobile money)
+
+**Execution status — backend implemented; provider sandbox verification pending.** Authenticated quote/initiate/refresh endpoints validate dynamic payout requirements and user-owned saved beneficiaries. The operation is bound to a verified account, canonical network/token metadata, the provider quote, and a request fingerprint. Off-ramp initiation persists only a curated allowlist of one-time deposit instructions; its expiry is taken from the provider or conservatively derived from an explicit duration in its note. If no safe expiry is available, the transfer-intent endpoint refuses to create a spendable action.
+
+`POST /payments/:paymentId/transfer-intents` accepts only an idempotency key. The server loads the payment and constructs a dedicated `payment_transfer` intent from the persisted provider address, exact amount, asset, account, expiry, gas/balance checks, and local chain adapter. A worker binds the intent to its confirmed transaction and then queues `/payment/confirm`; provider payout completion remains separate from chain confirmation.
 
 **Work**
 
@@ -286,6 +296,8 @@ This is a product normalization, not a claim that the provider exposes every loc
 - Sandbox full off-ramp journey from quote to signed chain transfer to provider confirmation/status, including insufficient token/gas balance, expiry, wrong chain, token-decimal mismatch, provider address substitution attempt, resubmission, provider delay, and payout reversal/failure.
 - The browser cannot change the receiving address/asset/amount after the server creates the payment transfer intent.
 - Chain confirmation is reported as “transfer sent/confirmed,” never as “bank payout complete” until provider reconciliation succeeds.
+
+**Local verification:** unit tests cover quote/initiation persistence and prove the transfer intent receives its amount, recipient, and token only from the server-stored provider instructions. Full signed-chain, provider confirmation, MySQL migration, and sandbox payout testing remain outstanding.
 
 ### Phase 6 — Buy volatile crypto with fiat and optional stablecoin swaps
 

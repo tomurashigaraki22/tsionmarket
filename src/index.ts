@@ -43,6 +43,8 @@ import { OnSwitchPaymentRepository } from './payments/onswitch/repository.js'
 import { OnSwitchCatalogueService } from './payments/onswitch/catalogue.js'
 import { OnSwitchWebhookService } from './payments/onswitch/webhook.js'
 import { OnSwitchWorker } from './payments/onswitch/worker.js'
+import { OnSwitchPaymentsService } from './payments/onswitch/service.js'
+import { OnSwitchPaymentFlowService } from './payments/onswitch/journeys.js'
 
 const environment = getEnvironment()
 const pool = createApplicationPool(environment)
@@ -82,6 +84,16 @@ const onSwitchConfig = getOnSwitchRuntimeConfig(environment)
 const onSwitchClient = onSwitchConfig ? new OnSwitchClient(onSwitchConfig) : null
 const onSwitchPaymentRepository = new OnSwitchPaymentRepository(pool)
 const onSwitchCatalogue = new OnSwitchCatalogueService(onSwitchClient, onSwitchPaymentRepository, environment)
+const onSwitchPayments = new OnSwitchPaymentsService(onSwitchPaymentRepository, environment)
+const onSwitchPaymentFlows = new OnSwitchPaymentFlowService(
+  onSwitchClient,
+  onSwitchCatalogue,
+  onSwitchPaymentRepository,
+  onSwitchPayments,
+  tradingRepository,
+  withdrawalIntentService,
+  environment,
+)
 const onSwitchWebhook = new OnSwitchWebhookService(onSwitchConfig, onSwitchPaymentRepository)
 const onSwitchWorker = onSwitchClient
   ? new OnSwitchWorker(onSwitchPaymentRepository, onSwitchClient, environment)
@@ -111,6 +123,7 @@ const app = createApp({
   withdrawalIntentService,
   onSwitchPaymentRepository,
   onSwitchCatalogue,
+  onSwitchPaymentFlows,
   onSwitchWebhook,
 })
 const server = createServer(app)

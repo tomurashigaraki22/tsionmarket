@@ -39,6 +39,9 @@ export type WithdrawalInput = {
   amountRaw: string
   idempotencyKey: string
   publicKey?: string | undefined
+  paymentOperationId?: string | undefined
+  paymentReference?: string | undefined
+  paymentExpiresAt?: Date | undefined
 }
 
 export class WithdrawalIntentService {
@@ -49,6 +52,24 @@ export class WithdrawalIntentService {
   ) {}
 
   async create(userId: string, input: WithdrawalInput) {
+    return this.createIntent(userId, input)
+  }
+
+  /** Internal payment flow: caller must derive every transfer field from the persisted payment record. */
+  async createPaymentTransfer(
+    userId: string,
+    input: Omit<WithdrawalInput, 'paymentOperationId' | 'paymentReference' | 'paymentExpiresAt'>,
+    payment: { operationId: string; providerReference: string; expiresAt: Date },
+  ) {
+    return this.createIntent(userId, {
+      ...input,
+      paymentOperationId: payment.operationId,
+      paymentReference: payment.providerReference,
+      paymentExpiresAt: payment.expiresAt,
+    })
+  }
+
+  private async createIntent(userId: string, input: WithdrawalInput) {
     if (!DECIMAL_RAW.test(input.amountRaw) || BigInt(input.amountRaw) <= 0n)
       throw new AppError('INVALID_WITHDRAWAL_AMOUNT', 'Enter a positive amount with supported precision', 400)
     if (input.idempotencyKey.length < 8 || input.idempotencyKey.length > 200)
@@ -58,6 +79,7 @@ export class WithdrawalIntentService {
       assetId: input.assetId,
       toAddress: input.toAddress,
       amountRaw: input.amountRaw,
+      paymentOperationId: input.paymentOperationId ?? null,
     })
     const prior = await this.repo.existingIntent(userId, input.idempotencyKey)
     if (prior) {
@@ -500,20 +522,36 @@ export class WithdrawalIntentService {
     const family = (unsigned as { family?: unknown }).family
     if (typeof family !== 'string')
       throw new AppError('WITHDRAWAL_INTENT_INVALID', 'Transaction family is missing', 500)
+    const normalizedSummary = input.paymentOperationId
+      ? {
+          ...summary,
+          paymentOperationId: input.paymentOperationId,
+          paymentReference: input.paymentReference,
+          paymentPurpose: 'onswitch-offramp',
+        }
+      : summary
+    const ttl = input.paymentExpiresAt
+      ? Math.min(
+          this.env.TRANSACTION_INTENT_TTL_SECONDS,
+          Math.floor((input.paymentExpiresAt.getTime() - Date.now()) / 1000),
+        )
+      : this.env.TRANSACTION_INTENT_TTL_SECONDS
+    if (ttl < 1)
+      throw new AppError('PAYMENT_DEPOSIT_EXPIRED', 'The provider deposit instructions have expired', 409)
     return this.repo
       .createIntent({
         userId,
         accountId: account.id,
         quoteId: null,
         key: input.idempotencyKey,
-        type: 'withdrawal',
+        type: input.paymentOperationId ? 'payment_transfer' : 'withdrawal',
         family,
         networkId: account.networkId,
         unsigned,
-        summary,
+        summary: normalizedSummary,
         validation: { ok: true },
         simulation: { ok: true },
-        ttl: this.env.TRANSACTION_INTENT_TTL_SECONDS,
+        ttl,
       })
       .then((intent) => ({ intent, existing: false }))
   }

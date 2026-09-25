@@ -16,12 +16,15 @@ describe('direct SQL safety and migrations', () => {
     const migrations = await discoverMigrations(defaultMigrationsDirectory)
     const payment = migrations.find((migration) => migration.version === '0024')
     const catalogue = migrations.find((migration) => migration.version === '0025')
+    const transfer = migrations.find((migration) => migration.version === '0026')
 
     expect(payment?.filename).toBe('0024_onswitch_payment_foundation.sql')
     expect(payment?.sql).toContain('CREATE TABLE payment_operations')
     expect(payment?.sql).toContain('CREATE TABLE onswitch_webhook_inbox')
     expect(catalogue?.filename).toBe('0025_onswitch_catalogue_cache.sql')
-    expect(migrations.at(-1)?.version).toBe('0025')
+    expect(transfer?.filename).toBe('0026_onswitch_payment_transfer_intents.sql')
+    expect(transfer?.sql).toContain("'payment_transfer'")
+    expect(migrations.at(-1)?.version).toBe('0026')
   })
 
   it('rejects values that could become unsafe dynamic SQL', () => {

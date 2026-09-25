@@ -33,8 +33,10 @@ const providerStatuses: Record<string, PaymentStatus> = {
   REVERSED: 'reversed',
 }
 
-export function normalizeProviderStatus(value: string): PaymentStatus {
-  return providerStatuses[value.trim().toUpperCase()] ?? 'unknown'
+export function normalizeProviderStatus(value: string, operationType?: PaymentOperationType): PaymentStatus {
+  const normalized = value.trim().toUpperCase()
+  if (normalized === 'AWAITING_DEPOSIT' && operationType === 'onramp') return 'awaiting_fiat'
+  return providerStatuses[normalized] ?? 'unknown'
 }
 
 export function isPaymentStatus(value: string): value is PaymentStatus {

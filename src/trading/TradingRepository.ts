@@ -140,7 +140,7 @@ export class TradingRepository {
     accountId: string
     quoteId: string | null
     key: string
-    type: 'swap' | 'erc20_approval' | 'withdrawal'
+    type: 'swap' | 'erc20_approval' | 'withdrawal' | 'payment_transfer'
     family: string
     networkId: string
     unsigned: unknown

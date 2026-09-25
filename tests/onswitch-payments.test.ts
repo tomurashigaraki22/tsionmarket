@@ -31,6 +31,8 @@ const validEnvironment = {
 describe('OnSwitch payment lifecycle primitives', () => {
   it('normalizes documented provider statuses and preserves unknown values as unknown', () => {
     expect(normalizeProviderStatus('AWAITING_DEPOSIT')).toBe('awaiting_chain')
+    expect(normalizeProviderStatus('AWAITING_DEPOSIT', 'onramp')).toBe('awaiting_fiat')
+    expect(normalizeProviderStatus('AWAITING_DEPOSIT', 'offramp')).toBe('awaiting_chain')
     expect(normalizeProviderStatus('PROCESSING')).toBe('processing')
     expect(normalizeProviderStatus('COMPLETED')).toBe('completed')
     expect(normalizeProviderStatus('REVERSED')).toBe('reversed')
@@ -87,6 +89,8 @@ describe('OnSwitch payment lifecycle primitives', () => {
     const reference = 'e6ef587e-d03d-44d0-a07a-a7e8a7aaabc1'
     const repository = {
       processWebhookBatch: vi.fn(async () => 1),
+      findConfirmedTransferLinks: vi.fn(async () => []),
+      getForWorker: vi.fn(async () => ({ operationType: 'offramp', terms: null, instructions: null })),
       claimConfirmationBatch: vi.fn(async () => [
         {
           id: 'payment-id',
@@ -127,6 +131,8 @@ describe('OnSwitch payment lifecycle primitives', () => {
   it('does not accept a provider status response for a different payment reference', async () => {
     const repository = {
       processWebhookBatch: vi.fn(async () => 0),
+      findConfirmedTransferLinks: vi.fn(async () => []),
+      getForWorker: vi.fn(async () => ({ operationType: 'offramp', terms: null, instructions: null })),
       claimConfirmationBatch: vi.fn(async () => []),
       recordConfirmationAttempt: vi.fn(async () => undefined),
       claimReconciliationBatch: vi.fn(async () => [
