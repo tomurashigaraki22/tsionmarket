@@ -127,13 +127,14 @@ Before deploying, edit it and set:
   AUTH_SMTP_USER / _FROM        adjust if your mailbox is not no-reply@
   *_RPC_URLS                    mainnet RPC endpoints
 
-OnSwitch remains disabled in this production stack. Sandbox testing requires
-a separate non-production deployment (NODE_ENV=staging) and isolated database;
-see docs/runbooks/onswitch-sandbox.md. Store any provider key only in deploy/.env
-or a secret manager; sandbox keys must never be used in production. Set a
-separate random ONSWITCH_IDEMPOTENCY_SECRET (at least 32 characters) before
-enabling payments. Keep the generated ONSWITCH_DATA_ENCRYPTION_KEY backed up
-with restricted access; losing it makes pending payment instructions unreadable.
+OnSwitch remains disabled in this production stack by default. For controlled
+pre-release sandbox testing, it can be enabled explicitly with the sandbox key
+and payment secrets in deploy/.env; see docs/runbooks/onswitch-sandbox.md. Keep
+provider keys server-side. Sandbox off-ramp testing must not request a real
+mainnet wallet transfer. Set a separate random ONSWITCH_IDEMPOTENCY_SECRET (at
+least 32 characters) before enabling payments. Keep the generated
+ONSWITCH_DATA_ENCRYPTION_KEY backed up with restricted access; losing it makes
+pending payment instructions unreadable.
 
 Then point DNS at this server and run ./deploy.sh again.
 EOF

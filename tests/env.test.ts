@@ -93,7 +93,7 @@ describe('environment validation', () => {
     ).toThrow(/OnSwitch live mode is allowed only in production/)
   })
 
-  it('does not permit sandbox payment starts in production', () => {
+  it('allows explicitly configured sandbox or live OnSwitch mode in production', () => {
     const productionEnvironment = {
       ...validEnvironment,
       NODE_ENV: 'production',
@@ -114,9 +114,11 @@ describe('environment validation', () => {
       ONSWITCH_SANDBOX_SERVICE_KEY: 'sandbox-test-secret-not-real',
       ONSWITCH_DATA_ENCRYPTION_KEY: 'e'.repeat(64),
     }
-    expect(() => parseEnvironment(productionEnvironment)).toThrow(
-      /OnSwitch sandbox mode is forbidden in production/,
-    )
+    const sandboxEnvironment = parseEnvironment(productionEnvironment)
+    expect(getOnSwitchRuntimeConfig(sandboxEnvironment)).toMatchObject({
+      environment: 'sandbox',
+      serviceKey: 'sandbox-test-secret-not-real',
+    })
 
     const liveEnvironment = parseEnvironment({
       ...productionEnvironment,

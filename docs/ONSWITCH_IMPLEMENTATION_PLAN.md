@@ -1,6 +1,6 @@
 # OnSwitch Payments — Implementation Plan
 
-- **Status:** Phases 1–9 code and operator documentation are implemented locally; Phase 0 vendor/live-readiness confirmations and Phase 9 sandbox E2E remain external release gates; production stays disabled
+- **Status:** Phases 1–9 code and operator documentation are implemented locally; Phase 0 vendor/live-readiness confirmations and Phase 9 sandbox E2E remain external release gates; production defaults to payments disabled, with explicit sandbox mode available for controlled pre-release testing
 - **Last reviewed:** 25 September 2026
 - **Scope:** `tsionmarket` backend and `tsionmarket-frontend` only.
 - **Provider docs:** [docs.onswitch.xyz](https://docs.onswitch.xyz/introduction)
@@ -36,7 +36,7 @@ The docs-based product boundary and integration contract are now recorded here. 
 Implemented in this change:
 
 - Server-only, fixed-origin OnSwitch client with a narrow endpoint allowlist; Switch wallet creation/export/transfer endpoints are deliberately excluded.
-- Separate sandbox/live secret variables, default-disabled feature flag, selected-key validation, and hard guards against sandbox in production or live mode outside production.
+- Separate sandbox/live secret variables, a default-disabled feature flag, selected-key validation, sandbox mode available for controlled production testing, and a guard that keeps live mode production-only.
 - API key sent only as `x-service-key`; HTTPS origin cannot be overridden, redirects are rejected, request/response byte limits and bounded timeouts are enforced, and ambiguous provider errors are normalized without exposing provider response bodies or request data.
 - Fixed-endpoint provider request counters and latency metrics; no query values, user IDs, PII, body, or credentials become metric labels.
 - Docker Compose passes OnSwitch credentials only to the API container, not the migration job. Local/deploy templates keep the integration disabled and contain no key values.
@@ -90,11 +90,11 @@ Implemented in code/documentation:
 
 Still pending before calling the sandbox rollout complete:
 
-- No named non-production host/Compose stack or isolated sandbox database is configured in this checkout. The live deployment compose explicitly uses `NODE_ENV=production`, and production rejects sandbox credentials. Do not enable sandbox mode there.
+- No named non-production host/Compose stack or isolated sandbox database is configured in this checkout. The live deployment Compose explicitly uses `NODE_ENV=production`; sandbox mode is now accepted there when explicitly configured, but the feature remains disabled by default. Sandbox off-ramp transfer intents against mainnet remain blocked.
 - The sandbox key will be supplied by the operator through the sandbox deployment environment; it is intentionally not in Git, `.env.example`, source, or this plan. No sandbox key is present in this workspace, and no authenticated Switch request or provider E2E test has been run.
 - Local tests do not verify corridor-specific provider simulation, callback signatures/retries, payout/settlement semantics, or alert delivery. Those must be exercised against the isolated sandbox before opening access to all sandbox users.
 
-Therefore Phase 8 implementation is complete pending review of retention/legal policy, and Phase 9 is **prepared but not rollout-verified**. Production remains disabled; a sandbox-wide rollout must happen only on a separate non-production deployment after the runbook smoke checks pass.
+Therefore Phase 8 implementation is complete pending review of retention/legal policy, and Phase 9 is **prepared but not rollout-verified**. Production remains disabled by default; a sandbox-wide rollout still requires runbook smoke checks, and broader testing should use an isolated non-production deployment.
 
 ## Product outcome
 

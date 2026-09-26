@@ -1,16 +1,20 @@
 # OnSwitch sandbox rollout and operator runbook
 
-This runbook is for a **separate, non-production TsionMarket deployment**. The
-production Compose stack hard-codes `NODE_ENV=production`; the backend rejects
-OnSwitch sandbox mode in production. Do not edit production to bypass that
-guard, and do not reuse its database or user sessions for sandbox testing.
+This runbook covers a separate staging deployment and controlled pre-release
+sandbox testing on the production host. The production Compose stack sets
+`NODE_ENV=production` and keeps payments disabled by default; explicitly
+selecting sandbox mode is supported when OnSwitch is enabled. Sandbox activity
+is simulated provider activity, not proof of a real-money settlement.
 
 ## Preconditions
 
 Before exposing the Switch sandbox to users, provision and record:
 
 - A separate staging host/app origin and Compose project, with an isolated
-  database and backups. It must run with `NODE_ENV=staging`.
+  database and backups, is preferred for broader sandbox testing. It runs with
+  `NODE_ENV=staging`. For a private pre-release production-host test, use only
+  trusted test accounts and a dedicated test wallet; payment starts are
+  otherwise available to signed-in users while enabled.
 - The sandbox service key from Switch, injected through the deployment
   environment/secret store. It must never be committed or placed in a frontend
   variable.
@@ -19,9 +23,9 @@ Before exposing the Switch sandbox to users, provision and record:
   characters). Keep the encryption key backed up with restricted access; losing
   or rotating it without re-encrypting pending instructions makes those
   instructions unreadable.
-- A callback URL configured at Switch for the staging host, plus confirmation
+- A callback URL configured at Switch for the selected host, plus confirmation
   of sandbox corridor, asset/network, simulated settlement, and webhook
-  behavior. Never use the production callback URL for sandbox events.
+  behavior. Never use a live callback URL for sandbox events.
 - A clearly visible “sandbox / simulated payments” disclosure in the staging
   app. Sandbox completion must not be presented as real money or an on-chain
   credit. The application does not credit wallet balances from provider status.
@@ -34,11 +38,10 @@ before rollout can be marked complete.
 
 ## Environment configuration
 
-On the staging API only, set the following values in the deployment secret
-store. Keep all new payment starts paused for the first deployment:
+Set the following values in the selected API deployment's secret store. Keep
+all new payment starts paused for the first deployment:
 
 ```ini
-NODE_ENV=staging
 ONSWITCH_ENABLED=true
 ONSWITCH_ENVIRONMENT=sandbox
 ONSWITCH_ONRAMP_STARTS_ENABLED=false
@@ -49,10 +52,12 @@ ONSWITCH_DATA_ENCRYPTION_KEY=<dedicated 32-byte key encoded as 64 hex characters
 ONSWITCH_MAX_ACTIVE_OPERATIONS_PER_USER=5
 ```
 
-Do not set `ONSWITCH_LIVE_SERVICE_KEY` in the sandbox deployment. Select a
-`NETWORK_MODE` and verified test wallet/network combination supported by the
-provider's sandbox account. Never bypass the application guard to request an
-off-ramp transfer intent against mainnet while using sandbox credentials.
+For staging, set `NODE_ENV=staging`; the production Compose stack already sets
+`NODE_ENV=production`, so do not override it in its env file. Do not set
+`ONSWITCH_LIVE_SERVICE_KEY` in a sandbox deployment. Select a `NETWORK_MODE`
+and verified test wallet/network combination supported by the provider's
+sandbox account. Sandbox off-ramp flows must never request or sign a real
+mainnet wallet transfer; that transfer-intent path remains blocked.
 
 Deploy the application and apply migrations using the staging deployment's
 normal process. Confirm migration `0028_onswitch_user_active_index.sql` is
@@ -122,4 +127,5 @@ an alert channel.
 Code and local CI safeguards are prepared, but this repository has no configured
 staging target and no Switch sandbox key is present here. Until the above
 deployment exists and its smoke tests pass, this is **not a completed sandbox
-rollout**. Production remains disabled and unchanged.
+rollout**. Production remains disabled by default; enabling sandbox is an
+explicit operator action.

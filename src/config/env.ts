@@ -216,13 +216,6 @@ export const EnvironmentSchema = z
           message: 'OnSwitch live mode is allowed only in production',
         })
       }
-      if (value.ONSWITCH_ENVIRONMENT === 'sandbox' && value.NODE_ENV === 'production') {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['ONSWITCH_ENVIRONMENT'],
-          message: 'OnSwitch sandbox mode is forbidden in production',
-        })
-      }
     }
     if (Boolean(value.AUTH_ACCESS_TOKEN_PREVIOUS_SECRET) !== Boolean(value.AUTH_ACCESS_TOKEN_PREVIOUS_KID)) {
       context.addIssue({

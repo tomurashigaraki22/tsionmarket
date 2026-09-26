@@ -84,16 +84,18 @@ have no safe fallback:
 | `AUTH_EMAIL_LINK_BASE_URL` | Where email links point — your frontend, not the API |
 | `*_RPC_URLS`               | Mainnet RPC endpoints for balances and transactions  |
 
-### OnSwitch (disabled in production until live approval)
+### OnSwitch (disabled by default)
 
-The production deployment template keeps OnSwitch disabled. Sandbox credentials
-must only be used on a separate non-production host with an isolated database;
-the backend intentionally refuses sandbox mode when `NODE_ENV=production`.
-Follow [`docs/runbooks/onswitch-sandbox.md`](../docs/runbooks/onswitch-sandbox.md)
-for sandbox setup and verification. Do not enable live payments until vendor
-onboarding, corridor approval, sandbox verification, and release review are
-complete. Sandbox and live credentials are distinct even though the provider
-uses one API host:
+The production deployment template keeps OnSwitch disabled by default. For
+controlled pre-release testing, sandbox mode can be explicitly enabled on the
+production host with the sandbox key and server-side payment secrets. Restrict
+access to trusted testers while it is enabled; sandbox off-ramp testing cannot
+request a real mainnet wallet transfer. Follow
+[`docs/runbooks/onswitch-sandbox.md`](../docs/runbooks/onswitch-sandbox.md) for
+setup and verification. Do not enable live payments until vendor onboarding,
+corridor approval, sandbox verification, and release review are complete.
+Sandbox and live credentials are distinct even though the provider uses one
+API host:
 
 ```ini
 ONSWITCH_ENABLED=false
@@ -113,11 +115,11 @@ ONSWITCH_WORKER_LOCK_SECONDS=90
 
 Keep the selected key only in `deploy/.env` (mode `0600`) or a deployment
 secret manager. Never put it in frontend variables, source code, Git, logs, or
-support messages. Production refuses sandbox mode; live mode requires the live
-key. Local/staging sandbox testing uses `ONSWITCH_ENVIRONMENT=sandbox` and the
-sandbox key. The separate `ONSWITCH_IDEMPOTENCY_SECRET` must be a random server
-secret of at least 32 characters; it HMAC-fingerprints idempotent payment
-requests without storing beneficiary form values in the database. The separate
+support messages. Sandbox mode requires `ONSWITCH_ENVIRONMENT=sandbox` and the
+sandbox key; live mode requires the live key and remains production-only. The
+separate `ONSWITCH_IDEMPOTENCY_SECRET` must be a random server secret of at
+least 32 characters; it HMAC-fingerprints idempotent payment requests without
+storing beneficiary form values in the database. The separate
 `ONSWITCH_DATA_ENCRYPTION_KEY` is 32 random bytes encoded as 64 hex characters;
 it encrypts one-time provider instructions at rest. Back it up with restricted
 access and do not rotate it without re-encrypting pending instructions.
