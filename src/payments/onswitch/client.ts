@@ -60,13 +60,15 @@ export type OnSwitchClientErrorCode =
   | 'TIMEOUT'
   | 'NETWORK_ERROR'
 
-/** Safe provider error: never carries a request body, response body, or key. */
+/** Provider errors carry only bounded, redacted diagnostics; never raw payloads or keys. */
 export class OnSwitchClientError extends Error {
   constructor(
     readonly code: OnSwitchClientErrorCode,
     readonly statusCode: number | null,
     readonly retryable: boolean,
     message: string,
+    readonly providerCode: string | null = null,
+    readonly providerMessage: string | null = null,
   ) {
     super(message)
     this.name = 'OnSwitchClientError'
@@ -164,8 +166,16 @@ export class OnSwitchClient {
       const responseText = await readBoundedText(response, MAX_RESPONSE_BYTES)
 
       if (!response.ok) {
+        const diagnostic = extractProviderDiagnostic(responseText, body)
         if (response.status === 429) {
-          throw new OnSwitchClientError('RATE_LIMITED', response.status, true, 'OnSwitch rate limit reached')
+          throw new OnSwitchClientError(
+            'RATE_LIMITED',
+            response.status,
+            true,
+            'OnSwitch rate limit reached',
+            diagnostic.code,
+            diagnostic.message,
+          )
         }
         if (response.status >= 500) {
           throw new OnSwitchClientError(
@@ -173,6 +183,8 @@ export class OnSwitchClient {
             response.status,
             true,
             'OnSwitch is temporarily unavailable',
+            diagnostic.code,
+            diagnostic.message,
           )
         }
         throw new OnSwitchClientError(
@@ -180,6 +192,8 @@ export class OnSwitchClient {
           response.status,
           false,
           'OnSwitch rejected the request',
+          diagnostic.code,
+          diagnostic.message,
         )
       }
 
@@ -205,11 +219,14 @@ export class OnSwitchClient {
         )
       }
       if (!envelope.data.success) {
+        const diagnostic = extractProviderDiagnostic(responseText, body)
         throw new OnSwitchClientError(
           'PROVIDER_REJECTED',
           response.status,
           false,
           'OnSwitch could not complete the request',
+          diagnostic.code,
+          diagnostic.message,
         )
       }
       return envelope.data
@@ -229,6 +246,97 @@ export class OnSwitchClient {
       recordOutboundRequest('onswitch', method, path, metricStatus, performance.now() - startedAt)
     }
   }
+}
+
+function extractProviderDiagnostic(
+  responseText: string,
+  requestBody: Record<string, unknown> | undefined,
+): { code: string | null; message: string | null } {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(responseText) as unknown
+  } catch {
+    return { code: null, message: null }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { code: null, message: null }
+
+  const record = parsed as Record<string, unknown>
+  const nestedError =
+    record.error && typeof record.error === 'object' && !Array.isArray(record.error)
+      ? (record.error as Record<string, unknown>)
+      : null
+  const code = safeProviderCode(record.code ?? nestedError?.code)
+  const rawMessage =
+    typeof record.message === 'string'
+      ? record.message
+      : typeof nestedError?.message === 'string'
+        ? nestedError.message
+        : null
+
+  return {
+    code,
+    message: rawMessage ? redactProviderMessage(rawMessage, requestBody) : null,
+  }
+}
+
+function safeProviderCode(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const code = value.trim()
+  return /^[a-zA-Z][a-zA-Z0-9_.-]{0,63}$/.test(code) ? code.toUpperCase() : null
+}
+
+function redactProviderMessage(
+  input: string,
+  requestBody: Record<string, unknown> | undefined,
+): string | null {
+  const privateValues: string[] = []
+  if (requestBody) collectSensitiveRequestValues(requestBody, '', privateValues)
+
+  const withoutControlCharacters = [...input]
+    .map((character) => {
+      const codePoint = character.charCodeAt(0)
+      return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f) ? ' ' : character
+    })
+    .join('')
+  let message = withoutControlCharacters.replace(/\s+/g, ' ').trim()
+  for (const value of [...new Set(privateValues)].sort((left, right) => right.length - left.length)) {
+    if (value.length < 3) continue
+    message = message.replace(new RegExp(escapeRegExp(value), 'gi'), '[redacted]')
+  }
+
+  message = message
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[redacted]')
+    .replace(/\b0x[a-f0-9]{40}\b/gi, '[redacted]')
+    .replace(/\b[A-HJ-NP-Za-km-z1-9]{32,64}\b/g, '[redacted]')
+    .replace(/\b\+?\d[\d ()-]{8,}\d\b/g, '[redacted]')
+    .slice(0, 400)
+    .trim()
+
+  return message || null
+}
+
+function collectSensitiveRequestValues(value: unknown, key: string, collected: string[]): void {
+  if (Array.isArray(value)) {
+    for (const item of value) collectSensitiveRequestValues(item, key, collected)
+    return
+  }
+  if (value && typeof value === 'object') {
+    for (const [childKey, childValue] of Object.entries(value))
+      collectSensitiveRequestValues(childValue, childKey, collected)
+    return
+  }
+  if (
+    /name|account|wallet|address|phone|email|mobile|recipient|beneficiary|reference|idempotency|narration|reason|amount/i.test(
+      key,
+    ) &&
+    (typeof value === 'string' || typeof value === 'number')
+  ) {
+    collected.push(String(value).trim())
+  }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 async function readBoundedText(response: Response, maxBytes: number): Promise<string> {

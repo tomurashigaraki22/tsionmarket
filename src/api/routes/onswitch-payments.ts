@@ -239,7 +239,12 @@ export function onSwitchPaymentsRouter(
       asyncHandler(async (request, response) => {
         const quoteId = z.string().uuid().parse(request.params.quoteId)
         const input = onrampInitiateInputSchema.parse(request.body)
-        const result = await flows.initiateOnramp(requireIdentity(request).userId, quoteId, input)
+        const result = await flows.initiateOnramp(
+          requireIdentity(request).userId,
+          quoteId,
+          input,
+          request.requestId,
+        )
         response.status(result.existing ? 200 : 201).json({ success: true, data: result })
       }),
     )
@@ -250,7 +255,12 @@ export function onSwitchPaymentsRouter(
       asyncHandler(async (request, response) => {
         const quoteId = z.string().uuid().parse(request.params.quoteId)
         const input = offrampInitiateInputSchema.parse(request.body)
-        const result = await flows.initiateOfframp(requireIdentity(request).userId, quoteId, input)
+        const result = await flows.initiateOfframp(
+          requireIdentity(request).userId,
+          quoteId,
+          input,
+          request.requestId,
+        )
         response.status(result.existing ? 200 : 201).json({ success: true, data: result })
       }),
     )

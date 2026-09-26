@@ -119,6 +119,31 @@ describe('OnSwitch server client', () => {
     }
   })
 
+  it('keeps provider rejection diagnostics useful while redacting beneficiary values', async () => {
+    const client = makeClient(async () =>
+      makeResponse(
+        {
+          success: false,
+          code: 'BENEFICIARY_INVALID',
+          message: 'Account 1234567890 for Test User could not be verified',
+        },
+        422,
+      ),
+    )
+
+    await expect(
+      client.post('/offramp/initiate', {
+        amount: 10,
+        beneficiary: { account_number: '1234567890', holder_name: 'Test User' },
+      }),
+    ).rejects.toMatchObject({
+      code: 'PROVIDER_REJECTED',
+      statusCode: 422,
+      providerCode: 'BENEFICIARY_INVALID',
+      providerMessage: 'Account [redacted] for [redacted] could not be verified',
+    })
+  })
+
   it('maps a provider-level failure envelope without leaking its message', async () => {
     const client = makeClient(async () =>
       makeResponse({ success: false, message: 'Sensitive bank account validation detail' }),

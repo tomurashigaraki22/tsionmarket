@@ -6,6 +6,7 @@ import type { Environment } from '../../config/env.js'
 import type { TradingRepository } from '../../trading/TradingRepository.js'
 import type { WithdrawalIntentService } from '../../trading/WithdrawalIntentService.js'
 import { AppError } from '../../utils/errors.js'
+import { logger } from '../../utils/logger.js'
 import type { OnSwitchCatalogueService } from './catalogue.js'
 import type { OnSwitchClient, OnSwitchEnvelope } from './client.js'
 import { OnSwitchClientError } from './client.js'
@@ -295,7 +296,12 @@ export class OnSwitchPaymentFlowService {
     return { id: stored.id, expiresAt, ...quote }
   }
 
-  async initiateOnramp(userId: string, quoteId: string, input: z.infer<typeof onrampInitiateInputSchema>) {
+  async initiateOnramp(
+    userId: string,
+    quoteId: string,
+    input: z.infer<typeof onrampInitiateInputSchema>,
+    requestId?: string,
+  ) {
     const quote = await this.loadQuote(userId, 'onramp', quoteId)
     const fingerprint = {
       quoteId,
@@ -342,10 +348,15 @@ export class OnSwitchPaymentFlowService {
       },
       ...(input.payer ? { payer: input.payer } : {}),
     }
-    return this.initiateProviderOperation(userId, operation.id, 'onramp', body, quote)
+    return this.initiateProviderOperation(userId, operation.id, 'onramp', body, quote, requestId)
   }
 
-  async initiateOfframp(userId: string, quoteId: string, input: z.infer<typeof offrampInitiateInputSchema>) {
+  async initiateOfframp(
+    userId: string,
+    quoteId: string,
+    input: z.infer<typeof offrampInitiateInputSchema>,
+    requestId?: string,
+  ) {
     const quote = await this.loadQuote(userId, 'offramp', quoteId)
     const fingerprint = {
       quoteId,
@@ -389,7 +400,7 @@ export class OnSwitchPaymentFlowService {
       ...(input.narration ? { narration: input.narration } : {}),
       ...(input.reason ? { reason: input.reason } : {}),
     }
-    return this.initiateProviderOperation(userId, operation.id, 'offramp', body, quote)
+    return this.initiateProviderOperation(userId, operation.id, 'offramp', body, quote, requestId)
   }
 
   async createOfframpTransferIntent(userId: string, paymentId: string, idempotencyKey: string) {
@@ -586,6 +597,7 @@ export class OnSwitchPaymentFlowService {
     direction: Direction,
     body: Record<string, unknown>,
     quote: { terms: QuoteTerms },
+    requestId?: string,
   ) {
     const began = await this.repository.beginInitiation(operationId)
     if (!began) return { payment: await this.requirePayment(userId, operationId), existing: true }
@@ -596,6 +608,18 @@ export class OnSwitchPaymentFlowService {
         body,
       )
     } catch (error) {
+      if (error instanceof OnSwitchClientError) {
+        logger.warn('OnSwitch payment initiation failed', {
+          ...(requestId ? { requestId } : {}),
+          operationId,
+          direction,
+          providerErrorCode: error.code,
+          providerStatusCode: error.statusCode,
+          retryable: error.retryable,
+          ...(error.providerCode ? { providerCode: error.providerCode } : {}),
+          ...(error.providerMessage ? { providerMessage: error.providerMessage } : {}),
+        })
+      }
       const ambiguous =
         !(error instanceof OnSwitchClientError) || error.retryable || error.code === 'INVALID_RESPONSE'
       const code = error instanceof OnSwitchClientError ? error.code : 'PROVIDER_ERROR'
