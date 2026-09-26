@@ -276,6 +276,32 @@ describe('OnSwitch dynamic catalogue', () => {
     expect(result.data[3]).toMatchObject({ path: 'wallet_address', required: true })
   })
 
+  it('fills the requested country when Switch institution rows omit it', async () => {
+    const { repository } = makeRepository()
+    const get = vi.fn(async (path) => {
+      if (path === '/institution')
+        return envelope([
+          { code: '000013', name: 'Guaranty Trust Bank' },
+          { code: '100004', name: 'Opay' },
+        ])
+      throw new Error('Unexpected endpoint')
+    })
+    const client: OnSwitchCatalogueClient = { get, post: vi.fn(async () => envelope({})) }
+    const service = new OnSwitchCatalogueService(client, repository, ENV)
+
+    const result = await service.institutions({ country: 'NG', currency: 'NGN', channel: 'BANK' })
+
+    expect(result.data).toEqual([
+      { code: '000013', name: 'Guaranty Trust Bank', country: 'NG' },
+      { code: '100004', name: 'Opay', country: 'NG' },
+    ])
+    expect(get).toHaveBeenCalledWith('/institution', {
+      country: 'NG',
+      currency: 'NGN',
+      channel: 'BANK',
+    })
+  })
+
   it('returns institution lookup name with a masked account and never echoes full account data', async () => {
     const { repository } = makeRepository()
     const post = vi.fn(async () =>

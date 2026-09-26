@@ -91,6 +91,17 @@ const requirementSchema = z.array(
     }),
 )
 
+const providerInstitutionSchema = z.array(
+  z.object({
+    code: z.string().min(1).max(80),
+    name: z.string().min(1).max(160),
+    country: z
+      .string()
+      .regex(/^[A-Z]{2}$/)
+      .optional(),
+  }),
+)
+
 const institutionSchema = z.array(
   z.object({
     code: z.string().min(1).max(80),
@@ -273,7 +284,13 @@ export class OnSwitchCatalogueService {
       .join('&')}`
     return this.cached(key, institutionSchema, async () => {
       const response = await this.client!.get('/institution', query)
-      return parseProviderData(response, institutionSchema)
+      return parseProviderData(response, providerInstitutionSchema).map((institution) => ({
+        code: institution.code,
+        name: institution.name,
+        // Switch's institution directory omits country on each row; the list
+        // is already scoped by the country query.
+        country: input.country,
+      }))
     })
   }
 
