@@ -417,10 +417,25 @@ describe('OnSwitch payment journeys', () => {
       channel: 'BANK',
       assetKey: 'arbitrum-one:usdc',
     })
+    const initialQuoteCall = vi.mocked(client.post).mock.calls.find(([path]) => path === '/offramp/quote')
+    expect(initialQuoteCall).toBeDefined()
+    expect(initialQuoteCall?.[1]).not.toHaveProperty('wallet')
+
+    // Simulate a quote created by the previous version, which incorrectly
+    // persisted the user's EVM address as Switch's Mongo Wallet ObjectId.
+    const legacyTerms = quoteTerms as { providerRequest: Record<string, unknown> }
+    legacyTerms.providerRequest.wallet = account.address
     await flow.initiateOfframp(userId, quoteId, {
       idempotencyKey: 'onswitch-offramp-key-0001',
       beneficiary: { holder_name: 'Test User', account_number: '0123456789', bank_code: '058' },
     })
+    const providerCalls = vi.mocked(client.post).mock.calls
+    const quoteCalls = providerCalls.filter(([path]) => path === '/offramp/quote')
+    const revalidationCall = quoteCalls[1]
+    expect(revalidationCall?.[1]).not.toHaveProperty('wallet')
+    const initiationCall = providerCalls.find(([path]) => path === '/offramp/initiate')
+    expect(initiationCall?.[1]).not.toHaveProperty('wallet')
+    expect(initiationCall?.[1]).toHaveProperty('refund_address', account.address)
     const result = await flow.createOfframpTransferIntent(userId, operationId, 'cashout-transfer-key-1')
 
     const transferCall = vi.mocked(withdrawals.createPaymentTransfer).mock.calls[0]

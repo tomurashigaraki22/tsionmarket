@@ -233,7 +233,6 @@ export class OnSwitchPaymentFlowService {
       asset: providerAsset,
       channel: input.channel,
       exact_output: false,
-      ...(operationType === 'offramp' ? { wallet: account.address } : {}),
     }
     const quote = await this.requestQuote(operationType, providerRequest)
     validateQuoteDirection(quote, operationType, input.currency, asset.symbol, input.channel)
@@ -1050,7 +1049,12 @@ function parseQuoteTerms(value: unknown): QuoteTerms {
     throw new AppError('PAYMENT_TERMS_INVALID', 'Stored payment asset is invalid', 409)
   const quote = storedSafeQuoteSchema.safeParse(object.quote)
   if (!quote.success) throw new AppError('PAYMENT_TERMS_INVALID', 'Stored payment quote is invalid', 409)
-  const providerRequest = asRecord(object.providerRequest)
+  const providerRequest = { ...asRecord(object.providerRequest) }
+  // Older off-ramp quotes incorrectly persisted the user's wallet address in
+  // Switch's optional `wallet` field. Switch treats that field as its own
+  // wallet ObjectId, so strip it from legacy quotes before revalidation or
+  // initiation. The user's address remains in accountAddress/refund_address.
+  if (object.operationType === 'offramp') delete providerRequest.wallet
   return {
     version: 1,
     operationType: object.operationType,
