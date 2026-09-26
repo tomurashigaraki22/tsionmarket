@@ -207,7 +207,29 @@ describe('OnSwitch payment journeys', () => {
       getForUser: vi.fn(async () => payment),
     } as unknown as OnSwitchPaymentRepository
     const catalogue = {
-      requirements: vi.fn(async () => ({ data: [] })),
+      requirements: vi.fn(async () => ({
+        data: [
+          {
+            path: 'holder_type',
+            regex: '^(?:INDIVIDUAL|BUSINESS)$',
+            example: 'INDIVIDUAL',
+            required: true,
+          },
+          {
+            path: 'holder_name',
+            regex: "^(?=.*[A-Za-z])[A-Za-z0-9\\s'&().,;-]{2,100}$",
+            example: 'John Doe',
+            required: true,
+          },
+          { path: 'channel', regex: '^BANK$', example: 'BANK', required: true },
+          {
+            path: 'wallet_address',
+            regex: '^[0-9A-Za-z]{20,100}$',
+            example: '0x1234567890123456789012345678901234567890',
+            required: true,
+          },
+        ],
+      })),
       requireAvailableSelection: vi.fn(async () => ({
         capabilities: { verifiedNetworks: ['arbitrum-one'] },
         corridor: { payoutLimits: { BANK: { min: '1000', max: '5000000' } } },

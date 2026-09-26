@@ -210,6 +210,72 @@ describe('OnSwitch dynamic catalogue', () => {
     })
   })
 
+  it('normalizes Switch bank requirements with optional required flags and metadata', async () => {
+    const { repository } = makeRepository()
+    const client: OnSwitchCatalogueClient = {
+      get: vi.fn(async () =>
+        envelope([
+          {
+            path: 'holder_type',
+            regex: '^INDIVIDUAL|BUSINESS$',
+            example: 'INDIVIDUAL',
+            hint: 'Select a holder type from the options',
+            option: [
+              { name: 'Individual', code: 'INDIVIDUAL' },
+              { name: 'Business', code: 'BUSINESS' },
+            ],
+          },
+          {
+            path: 'holder_name',
+            regex: "^(?=.*[A-Za-z])[A-Za-z0-9\\s\\-'&().,;]{2,100}$",
+            example: 'John Doe',
+            hint: 'Must be a valid 2-100 characters long name',
+            option: [],
+          },
+          {
+            path: 'channel',
+            regex: '^BANK$',
+            example: 'BANK',
+            hint: 'Select a transfer channel from the options',
+            option: [{ name: 'Bank', code: 'BANK' }],
+          },
+          {
+            path: 'wallet_address',
+            regex: '^[0-9A-Za-z]{20,100}$',
+            example: '0x1234567890123456789012345678901234567890',
+            hint: 'Must be a valid Solana or any EVM wallet address',
+            option: [],
+          },
+        ]),
+      ),
+      post: vi.fn(async () => envelope({})),
+    }
+    const service = new OnSwitchCatalogueService(client, repository, ENV)
+
+    const result = await service.requirements({
+      direction: 'ONRAMP',
+      country: 'NG',
+      currency: 'NGN',
+      channel: 'BANK',
+      holderType: 'INDIVIDUAL',
+    })
+
+    expect(result.data).toHaveLength(4)
+    expect(result.data[0]).toMatchObject({
+      path: 'holder_type',
+      regex: '^(?:INDIVIDUAL|BUSINESS)$',
+      required: true,
+      option: [
+        { name: 'Individual', code: 'INDIVIDUAL' },
+        { name: 'Business', code: 'BUSINESS' },
+      ],
+    })
+    expect(result.data[1]).toMatchObject({ path: 'holder_name', required: true })
+    expect(new RegExp(result.data[1]!.regex).test("John O'Neil")).toBe(true)
+    expect(result.data[2]).toMatchObject({ path: 'channel', required: true })
+    expect(result.data[3]).toMatchObject({ path: 'wallet_address', required: true })
+  })
+
   it('returns institution lookup name with a masked account and never echoes full account data', async () => {
     const { repository } = makeRepository()
     const post = vi.fn(async () =>

@@ -688,7 +688,7 @@ export class OnSwitchPaymentFlowService {
     const topLevelRequirements = new Map<string, { required: boolean; regex: string }>()
     for (const field of requirements.data) {
       const path = field.path.replace(/^beneficiary\./, '')
-      if (['sender_name', 'narration', 'reason'].includes(path)) {
+      if (['channel', 'sender_name', 'narration', 'reason'].includes(path)) {
         topLevelRequirements.set(path, { required: field.required, regex: field.regex })
       } else if (isSafeBeneficiaryPath(path)) {
         allowed.set(path, { required: field.required, regex: field.regex })
@@ -723,6 +723,7 @@ export class OnSwitchPaymentFlowService {
         throw new AppError('PAYMENT_BENEFICIARY_REQUIRED', `Missing required beneficiary field: ${path}`, 400)
     }
     const topLevelValues: Record<string, string | undefined> = {
+      channel: String(terms.providerRequest.channel),
       sender_name: input.senderName,
       narration: input.narration,
       reason: input.reason,
@@ -754,9 +755,11 @@ export class OnSwitchPaymentFlowService {
       holder_type: input.holderType,
       holder_name: input.holderName,
       wallet_address: terms.accountAddress,
+      channel: String(terms.providerRequest.channel),
       'beneficiary.holder_type': input.holderType,
       'beneficiary.holder_name': input.holderName,
       'beneficiary.wallet_address': terms.accountAddress,
+      'beneficiary.channel': String(terms.providerRequest.channel),
       ...(input.payer
         ? {
             mobile_number: input.payer.mobile_number,

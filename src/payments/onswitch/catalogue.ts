@@ -37,6 +37,28 @@ const providerAssetSchema = z.array(
   }),
 )
 
+const providerRequirementSchema = z.array(
+  z.object({
+    path: z
+      .string()
+      .min(1)
+      .max(128)
+      .regex(/^[a-zA-Z][a-zA-Z0-9_.-]*(\[\])?$/),
+    regex: z.string().min(1).max(256),
+    example: z.string().max(128),
+    required: z.boolean().optional(),
+    hint: z.string().max(256).optional(),
+    option: z
+      .array(
+        z.object({
+          name: z.string().min(1).max(160),
+          code: z.string().min(1).max(128),
+        }),
+      )
+      .optional(),
+  }),
+)
+
 const requirementSchema = z.array(
   z
     .object({
@@ -48,6 +70,15 @@ const requirementSchema = z.array(
       regex: z.string().min(1).max(256),
       example: z.string().max(128),
       required: z.boolean(),
+      hint: z.string().max(256).optional(),
+      option: z
+        .array(
+          z.object({
+            name: z.string().min(1).max(160),
+            code: z.string().min(1).max(128),
+          }),
+        )
+        .optional(),
     })
     .strict()
     .superRefine((field, context) => {
@@ -222,7 +253,7 @@ export class OnSwitchCatalogueService {
       .join('&')}`
     return this.cached(key, requirementSchema, async () => {
       const response = await this.client!.get('/beneficiary/requirement', query)
-      return normalizeRequirements(parseProviderData(response, requirementSchema))
+      return normalizeRequirements(parseProviderData(response, providerRequirementSchema))
     })
   }
 
@@ -516,14 +547,64 @@ function minIso(...values: string[]): string {
     .toISOString()
 }
 
-function normalizeRequirements(fields: z.infer<typeof requirementSchema>) {
-  return fields.map((field) => ({
-    ...field,
-    example: stripControlCharacters(field.example).slice(0, 128),
-  }))
+function normalizeRequirements(fields: z.infer<typeof providerRequirementSchema>) {
+  return fields.map((field) => {
+    const normalized = {
+      ...field,
+      regex: normalizeProviderRequirementPattern(field),
+      required: field.required ?? true,
+      example: stripControlCharacters(field.example).slice(0, 128),
+      ...(field.hint ? { hint: stripControlCharacters(field.hint).slice(0, 256) } : {}),
+      ...(field.option
+        ? {
+            option: field.option.map((option) => ({
+              name: stripControlCharacters(option.name).slice(0, 160),
+              code: stripControlCharacters(option.code).slice(0, 128),
+            })),
+          }
+        : {}),
+    }
+    const parsed = requirementSchema.element.safeParse(normalized)
+    if (!parsed.success)
+      throw new AppError(
+        'PAYMENT_PROVIDER_INVALID_RESPONSE',
+        'Payment provider returned invalid catalogue data',
+        502,
+      )
+    return parsed.data
+  })
+}
+
+function normalizeProviderRequirementPattern(
+  field: z.infer<typeof providerRequirementSchema>[number],
+): string {
+  const path = field.path.replace(/^beneficiary\./, '')
+
+  // Switch currently returns an ungrouped alternation for this field. Replace
+  // it with a fully anchored rule derived only from the supported option codes.
+  if (path === 'holder_type') {
+    const optionCodes = field.option?.map((option) => option.code) ?? ['INDIVIDUAL', 'BUSINESS']
+    const supportedCodes = (['INDIVIDUAL', 'BUSINESS'] as const).filter((code) => optionCodes.includes(code))
+    if (supportedCodes.length === 0) return field.regex
+    if (supportedCodes.length === 1) return `^${supportedCodes[0]}$`
+    return `^(?:${[...new Set(supportedCodes)].join('|')})$`
+  }
+
+  // This equivalent bounded rule avoids forwarding Switch's look-ahead regex
+  // while retaining its current name constraints (length, allowed characters,
+  // and at least one ASCII letter).
+  if (path === 'holder_name') return "^(?=.*[A-Za-z])[A-Za-z0-9\\s'&().,;-]{2,100}$"
+
+  return field.regex
 }
 
 function isSafeProviderPattern(value: string): boolean {
+  if (
+    value === '^(?:INDIVIDUAL|BUSINESS)$' ||
+    value === '^(?=.*[A-Za-z])[A-Za-z0-9\\s\'&().,;-]{2,100}$'
+  )
+    return true
+
   // The provider supplies these patterns. Accept only anchored, simple
   // character classes/escapes and at most one bounded-or-linear quantifier;
   // reject groups, alternation, backreferences, and nested quantifiers to
