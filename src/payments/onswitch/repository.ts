@@ -313,7 +313,7 @@ export class OnSwitchPaymentRepository {
             idempotency_key,request_fingerprint,country,fiat_currency,channel,asset_key,source_amount,
             destination_amount,source_amount_raw,destination_amount_raw,source_decimals,destination_decimals,
             terms_snapshot,expires_at,next_reconcile_at)
-           VALUES(?,?,?,?,?,?,?,'created',?,?,?,?,?,?,?,?,?,?,?,?,DATE_ADD(NOW(6), INTERVAL 20 SECOND))`,
+           VALUES(?,?,?,?,?,?,?,'created',?,?,?,?,?,?,?,?,?,?,?,?,?,?,DATE_ADD(NOW(6), INTERVAL 20 SECOND))`,
           [
             id,
             input.userId,
