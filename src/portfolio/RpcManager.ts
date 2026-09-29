@@ -2,6 +2,7 @@ import { Connection } from '@solana/web3.js'
 import { createPublicClient, defineChain, fallback, http, type PublicClient } from 'viem'
 import type { Environment } from '../config/env.js'
 import { AppError } from '../utils/errors.js'
+import { logger } from '../utils/logger.js'
 import type { Network } from './networks.js'
 
 export class RpcManager {
@@ -108,6 +109,7 @@ export class RpcManager {
     const now = Date.now(),
       available = urls.filter((url) => (this.cooldowns.get(`${network.networkId}:${url}`) ?? 0) <= now),
       candidates = available.length ? available : urls
+    const failures: Array<{ provider: string; reason: string }> = []
     for (const url of candidates) {
       try {
         return await operation(
@@ -116,10 +118,73 @@ export class RpcManager {
             confirmTransactionInitialTimeout: this.env.RPC_TIMEOUT_MS,
           }),
         )
-      } catch {
+      } catch (error) {
+        // A deliberate rejection is not a provider fault. The operations run
+        // here throw AppError for business conditions — an unlisted token, a
+        // decimals mismatch, a wallet with no token account — and catching
+        // those as transport failures blacklisted a healthy provider, retried
+        // the same doomed work against every other one, and reported the
+        // result as "all RPC providers failed". Two working endpoints looked
+        // like an outage, and the real reason never reached the caller.
+        if (error instanceof AppError) throw error
+
+        // Everything else is the provider's fault and is worth recording.
+        // Previously this swallowed the error entirely, so a 403 from a
+        // rotated key, a 429, and a DNS failure were indistinguishable.
+        const reason = error instanceof Error ? error.message : String(error)
+        failures.push({ provider: redactRpcUrl(url), reason })
+        logger.warn('Solana RPC provider failed', {
+          networkId: network.networkId,
+          provider: redactRpcUrl(url),
+          reason,
+        })
         this.cooldowns.set(`${network.networkId}:${url}`, Date.now() + this.env.RPC_PROVIDER_COOLDOWN_MS)
       }
     }
-    throw new AppError('RPC_ALL_PROVIDERS_FAILED', `All RPC providers failed for ${network.networkId}`, 503)
+    throw new AppError(
+      'RPC_ALL_PROVIDERS_FAILED',
+      `All ${candidates.length} RPC provider(s) failed for ${network.networkId}: ${failures
+        .map((item) => `${item.provider} (${item.reason})`)
+        .join('; ')}`,
+      503,
+      { providers: failures },
+    )
+  }
+}
+
+/**
+ * An RPC endpoint is a credential.
+ *
+ * Providers put the API key straight in the path — .../v2/<key> — so logging
+ * or returning the URL as-is would publish it to the client and to every log
+ * sink. Only the host and enough of the path to tell two providers apart is
+ * kept.
+ */
+const ROUTE_SEGMENTS = new Set([
+  'rpc',
+  'api',
+  'v1',
+  'v2',
+  'v3',
+  'solana',
+  'eth',
+  'mainnet',
+  'mainnet-beta',
+  'testnet',
+  'devnet',
+  'ws',
+])
+
+export function redactRpcUrl(url: string): string {
+  try {
+    const parsed = new URL(url)
+    const [first] = parsed.pathname.split('/').filter(Boolean)
+    // Only segments known to be routes are kept. Length is not a safe test:
+    // a short key is still a key, and guessing wrong publishes a credential.
+    // Anything unrecognised is treated as a secret.
+    const suffix = first ? (ROUTE_SEGMENTS.has(first.toLowerCase()) ? `/${first}` : '/…') : ''
+    return `${parsed.host}${suffix}`
+  } catch {
+    return 'malformed-rpc-url'
   }
 }
