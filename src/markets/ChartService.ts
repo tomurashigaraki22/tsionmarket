@@ -86,16 +86,41 @@ const BIRDEYE_BARS = 1000
 const UPSTREAM_TIMEOUT_MS = 8_000
 const MAX_CACHE_ENTRIES = 500
 
+/**
+ * GeckoTerminal's public API allows roughly thirty calls a minute per IP and
+ * answers a burst with 429. Every chart open costs calls, and this one origin
+ * serves every viewer, so calls are spaced out here rather than fired in
+ * parallel and rejected.
+ */
+const GECKO_SPACING_MS = 2_200
+const GECKO_MAX_QUEUE_MS = 12_000
+const GECKO_MAX_COOLDOWN_MS = 20_000
+/** How long a good chart may be served when every source is failing. */
+const LAST_GOOD_TTL_MS = 2 * 60 * 60_000
+const VOLUME_TTL_MS = 5 * 60_000
+
+/** A source failed to answer. Not the same as answering "nothing here". */
+class UpstreamUnavailable extends Error {}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
 type CacheEntry<T> = { value: T; expires: number }
 
 export class ChartService {
   /** Ranked pools, retained so a newly-created deepest pool cannot truncate history. */
   private readonly pools = new Map<string, CacheEntry<Array<string>>>()
   private readonly charts = new Map<string, CacheEntry<ChartPayload>>()
+  /** The last non-empty answer per chart, served if every source later fails. */
+  private readonly lastGood = new Map<string, CacheEntry<ChartPayload>>()
+  private readonly volumes = new Map<string, CacheEntry<number | null>>()
+  private geckoNext = 0
   /** One upstream round-trip per key, however many viewers ask at once. */
   private readonly inflight = new Map<string, Promise<ChartPayload>>()
 
-  constructor(private readonly env: Environment) {}
+  constructor(
+    private readonly env: Environment,
+    private readonly options: { geckoSpacingMs?: number } = {},
+  ) {}
 
   async candles(input: {
     networkId: string
@@ -117,9 +142,24 @@ export class ChartService {
         // Intraday bars move; a daily bar does not. An empty answer is cached
         // briefly too, so an unlisted token is not re-asked on every poll —
         // but briefly, because empty is often a transient provider miss.
-        const ttl = payload.candles.length === 0 ? 10_000 : input.interval === '1d' ? 5 * 60_000 : 45_000
-        write(this.charts, key, payload, ttl)
-        return payload
+        if (payload.candles.length > 0) write(this.lastGood, key, payload, LAST_GOOD_TTL_MS)
+        // Every source failing is not the same as the token having no chart:
+        // keep showing the last good one, and ask again within seconds.
+        const fallback =
+          payload.candles.length === 0 && payload.degraded ? read(this.lastGood, key) : undefined
+        const answer = fallback ?? payload
+        const ttl =
+          answer.candles.length === 0
+            ? payload.degraded
+              ? 3_000
+              : 10_000
+            : fallback
+              ? 3_000
+              : input.interval === '1d'
+                ? 5 * 60_000
+                : 45_000
+        write(this.charts, key, answer, ttl)
+        return answer
       })
       .finally(() => this.inflight.delete(key))
 
@@ -136,6 +176,15 @@ export class ChartService {
     source?: ChartSource | undefined
   }): Promise<ChartPayload> {
     const { networkId, token, interval, coinId, before, source } = input
+    let degraded = false
+    const attempt = async (work: () => Promise<ChartPayload | null>): Promise<ChartPayload | null> => {
+      try {
+        return await work()
+      } catch {
+        degraded = true
+        return null
+      }
+    }
 
     // Each provider gets its own budget: a slow or rate-limited first source
     // must not consume the time the fallbacks need.
@@ -169,6 +218,7 @@ export class ChartService {
       source: null,
       intervals: coinId && !token ? COINGECKO_INTERVALS : ALL_INTERVALS,
       nextCursor: null,
+      ...(degraded ? { degraded: true } : {}),
     }
   }
 
@@ -196,7 +246,10 @@ export class ChartService {
       headers: { accept: 'application/json', 'X-API-KEY': apiKey, 'x-chain': chain },
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     })
-    // A 429 is routine on a free key; null moves to the next source.
+    // A 429 is routine on a free key: move to the next source, but remember
+    // that this one did not actually answer.
+    if (response.status === 429 || response.status >= 500)
+      throw new UpstreamUnavailable(`Birdeye returned ${response.status}`)
     if (!response.ok) return null
 
     const body = (await response.json()) as {
@@ -240,6 +293,7 @@ export class ChartService {
     if (!slug || !timeframe) return null
 
     const pools = await this.findPools(slug, token)
+    let unavailable = false
     for (const pool of pools) {
       try {
         const url = new URL(`${GECKO}/networks/${slug}/pools/${pool}/ohlcv/${timeframe.timeframe}`)
@@ -252,14 +306,8 @@ export class ChartService {
         url.searchParams.set('token', token)
         if (before) url.searchParams.set('before_timestamp', String(before - 1))
 
-        const signal = AbortSignal.timeout(UPSTREAM_TIMEOUT_MS)
-        const [ohlcv, poolDetail] = await Promise.all([
-          fetch(url, { headers: { accept: 'application/json' }, signal }),
-          fetch(`${GECKO}/networks/${slug}/pools/${pool}`, {
-            headers: { accept: 'application/json' },
-            signal,
-          }),
-        ])
+        const ohlcv = await this.geckoFetch(url)
+        if (ohlcv.status >= 500) throw new UpstreamUnavailable(`GeckoTerminal returned ${ohlcv.status}`)
         if (!ohlcv.ok) continue
 
         const body = (await ohlcv.json()) as {
@@ -273,13 +321,9 @@ export class ChartService {
 
         // Price and change come from the series, which is priced in our token.
         // Volume is a property of the pool and reads the same from either side.
-        let volume24h: number | null = null
-        if (poolDetail.ok) {
-          const detail = (await poolDetail.json()) as {
-            data?: { attributes?: { volume_usd?: Record<string, string> } }
-          }
-          volume24h = num(detail.data?.attributes?.volume_usd?.h24)
-        }
+        // It is optional and slow-moving, so it is cached and never allowed to
+        // cost the chart a rate-limit slot on every open.
+        const volume24h = before ? null : await this.poolVolume(slug, pool)
 
         return {
           candles,
@@ -290,10 +334,12 @@ export class ChartService {
         }
       } catch {
         // One pool timing out must not hide older bars available in the next
-        // ranked pool.
+        // ranked pool, but it must not be mistaken for "no data" either.
+        unavailable = true
         continue
       }
     }
+    if (unavailable) throw new UpstreamUnavailable('GeckoTerminal did not answer')
     return null
   }
 
@@ -339,21 +385,72 @@ export class ChartService {
     }
   }
 
+  /**
+   * Every GeckoTerminal call goes through here: spaced to stay under its
+   * limit, and after a 429 the whole service backs off together rather than
+   * each viewer finding out separately.
+   */
+  private async geckoFetch(url: string | URL): Promise<Response> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const slot = Math.max(Date.now(), this.geckoNext)
+      if (slot - Date.now() > GECKO_MAX_QUEUE_MS) throw new UpstreamUnavailable('GeckoTerminal queue is full')
+      this.geckoNext = slot + (this.options.geckoSpacingMs ?? GECKO_SPACING_MS)
+      const wait = slot - Date.now()
+      if (wait > 0) await sleep(wait)
+
+      const response = await fetch(url, {
+        headers: { accept: 'application/json' },
+        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      })
+      if (response.status !== 429) return response
+
+      const retryAfter = Number(response.headers.get('retry-after'))
+      const cooldown = Math.min(
+        GECKO_MAX_COOLDOWN_MS,
+        Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 6_000,
+      )
+      this.geckoNext = Math.max(this.geckoNext, Date.now() + cooldown)
+      // One patient retry when the wait is short; otherwise tell the caller.
+      if (attempt === 1 || cooldown > 8_000) throw new UpstreamUnavailable('GeckoTerminal rate limited')
+    }
+    throw new UpstreamUnavailable('GeckoTerminal rate limited')
+  }
+
+  private async poolVolume(slug: string, pool: string): Promise<number | null> {
+    const key = `${slug}:${pool}`
+    const hit = read(this.volumes, key)
+    if (hit !== undefined) return hit
+    try {
+      const response = await this.geckoFetch(`${GECKO}/networks/${slug}/pools/${pool}`)
+      if (!response.ok) return null
+      const detail = (await response.json()) as {
+        data?: { attributes?: { volume_usd?: Record<string, string> } }
+      }
+      const volume = num(detail.data?.attributes?.volume_usd?.h24)
+      write(this.volumes, key, volume, VOLUME_TTL_MS)
+      return volume
+    } catch {
+      return null
+    }
+  }
+
   private async findPools(slug: string, token: string): Promise<Array<string>> {
     const key = `${slug}:${token.toLowerCase()}`
     const hit = read(this.pools, key)
     if (hit !== undefined) return hit
 
-    const response = await fetch(
+    const response = await this.geckoFetch(
       `${GECKO}/networks/${slug}/tokens/${encodeURIComponent(token)}/pools?page=1`,
-      { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) },
     )
     if (!response.ok) {
-      // A rate limit or outage is not proof the token has no pool. Cache only
-      // a genuine 404 — caching 429/5xx keeps charts empty long after a
-      // transient failure.
-      if (response.status === 404) write(this.pools, key, [], 10 * 60_000)
-      return []
+      // Only a genuine 404 means the token has no pool. A rate limit or outage
+      // is not proof of that, and is reported as such so nothing is cached as
+      // "unlisted" and the chart retries.
+      if (response.status === 404) {
+        write(this.pools, key, [], 10 * 60_000)
+        return []
+      }
+      throw new UpstreamUnavailable(`GeckoTerminal returned ${response.status}`)
     }
     const body = (await response.json()) as {
       data?: Array<{ id?: string; attributes?: { address?: string; reserve_in_usd?: string } }>
@@ -373,15 +470,6 @@ export class ChartService {
       .map((row) => row.address)
     write(this.pools, key, pools, pools.length ? 60 * 60_000 : 10 * 60_000)
     return pools
-  }
-}
-
-/** An upstream being unreachable is not a worse answer than the next source. */
-async function attempt(work: () => Promise<ChartPayload | null>): Promise<ChartPayload | null> {
-  try {
-    return await work()
-  } catch {
-    return null
   }
 }
 

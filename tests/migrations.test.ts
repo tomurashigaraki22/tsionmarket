@@ -30,7 +30,7 @@ describe('direct SQL safety and migrations', () => {
     expect(paymentSwap?.sql).toContain('source_payment_operation_id')
     expect(paymentAbuse?.filename).toBe('0028_onswitch_user_active_index.sql')
     expect(paymentAbuse?.sql).toContain('idx_payment_operations_user_status')
-    expect(migrations.at(-1)?.version).toBe('0028')
+    expect(migrations.at(-1)?.version).toBe('0029')
   })
 
   it('rejects values that could become unsafe dynamic SQL', () => {

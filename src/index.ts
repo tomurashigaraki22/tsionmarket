@@ -30,6 +30,7 @@ import { DepositWatcher } from './arcade/DepositWatcher.js'
 import { DepositIntentService } from './arcade/DepositIntentService.js'
 import { ChessRepository } from './arcade/ChessRepository.js'
 import { SettingsRepository } from './settings/SettingsRepository.js'
+import { WalletSyncRepository } from './wallet/WalletSyncRepository.js'
 import { WithdrawalIntentService } from './trading/WithdrawalIntentService.js'
 import { ChessWorker } from './arcade/ChessWorker.js'
 import { ProfileRepository } from './social/ProfileRepository.js'
@@ -82,6 +83,7 @@ const depositWatcher = new DepositWatcher(pool, rpcManager, environment)
 const depositIntents = new DepositIntentService(pool, rpcManager, environment)
 const chessRepository = new ChessRepository(pool)
 const settingsRepository = new SettingsRepository(pool)
+const walletSyncRepository = new WalletSyncRepository(pool)
 const chessWorker = new ChessWorker(chessRepository)
 const profileRepository = new ProfileRepository(pool)
 const floorService = new FloorService(new FloorRepository(pool), profileRepository, pool)
@@ -129,6 +131,7 @@ const app = createApp({
   depositIntents,
   chessRepository,
   settingsRepository,
+  walletSyncRepository,
   withdrawalIntentService,
   onSwitchPaymentRepository,
   onSwitchCatalogue,

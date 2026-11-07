@@ -44,7 +44,7 @@ describe('chart history', () => {
         return new Response(JSON.stringify({ data: { attributes: {} } }), { status: 200 })
       }),
     )
-    const service = new ChartService({ BIRDEYE_API_KEY: '' } as Environment)
+    const service = new ChartService({ BIRDEYE_API_KEY: '' } as Environment, { geckoSpacingMs: 0 })
     const input = {
       networkId: 'solana-mainnet-beta',
       token: 'mint',
@@ -100,7 +100,7 @@ describe('chart history', () => {
         })
       }),
     )
-    const service = new ChartService({ BIRDEYE_API_KEY: '' } as Environment)
+    const service = new ChartService({ BIRDEYE_API_KEY: '' } as Environment, { geckoSpacingMs: 0 })
     const input = {
       networkId: 'solana-mainnet-beta',
       token: 'mint',

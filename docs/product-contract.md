@@ -6,7 +6,7 @@ TsionMarket is a crypto **spot-market** product. It is not a prediction market, 
 
 The initial backend responsibilities are authentication, user-to-public-wallet ownership, balances, market discovery, quotes, reviewed transaction intents, signed-payload validation/submission, reconciliation, and history.
 
-The frontend is exclusively responsible for wallet generation/provisioning, secret storage/encryption, recovery material, unlocking, and signing. The backend must never request wallet secrets. It registers public account metadata only after verifying a short-lived ownership challenge signed by the wallet.
+The frontend is exclusively responsible for wallet generation/provisioning, secret storage/encryption, recovery material, unlocking, and signing. The backend may hold one encrypted wallet backup per user purely as opaque ciphertext for restoring on another device (see the threat model); it never holds anything that can decrypt it. The backend must never request wallet secrets. It registers public account metadata only after verifying a short-lived ownership challenge signed by the wallet.
 
 ## Initial execution scope
 

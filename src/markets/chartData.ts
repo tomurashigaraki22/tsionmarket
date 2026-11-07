@@ -32,6 +32,12 @@ export type ChartPayload = {
   intervals: Array<string>
   /** Timestamp of the oldest bar, passed back to request older history. */
   nextCursor: number | null
+  /**
+   * Set when no source drew this token because one or more of them failed to
+   * answer (rate limited, timed out, down), as opposed to answering that it
+   * has no data. The chart retries instead of declaring the market unlisted.
+   */
+  degraded?: boolean
 }
 
 /** Bar length in seconds for each interval the chart offers. */

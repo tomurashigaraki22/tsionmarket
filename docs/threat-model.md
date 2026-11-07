@@ -11,6 +11,10 @@
 
 Wallet private keys, seed phrases, recovery secrets, and wallet DEKs are deliberately not backend assets because they remain on the frontend.
 
+**Encrypted wallet sync.** The backend does store one opaque, client-encrypted wallet backup per user (`wallet_sync_backups`) so a wallet can be restored on another device. It holds ciphertext only: the data key is wrapped with an Argon2id key derived from the user's wallet passphrase, and every account secret and the recovery phrase are AES-GCM encrypted under it. The passphrase and the data key never reach the server, and the device-bound PIN wrap is never uploaded. The upload schema is strict, so any field outside the encrypted-envelope shape (a recovery phrase, a raw key, a PIN wrap) is rejected, and KDF parameters below a floor (32 MiB, 2 iterations) are refused.
+
+The residual risk is offline guessing: anyone who obtains a backup (a database leak, or a stolen session) can try passphrases against it without rate limits. Argon2id and the 12-character passphrase minimum make that expensive, not impossible, so a weak passphrase is the weak point. A PIN is never used to protect the synced backup, because a 6-digit PIN would fall to offline brute force in seconds.
+
 ## Trust boundaries
 
 ```text

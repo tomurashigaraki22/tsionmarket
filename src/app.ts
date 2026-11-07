@@ -40,6 +40,8 @@ import type { ChessRepository } from './arcade/ChessRepository.js'
 import { chessRouter } from './api/routes/chess.js'
 import type { SettingsRepository } from './settings/SettingsRepository.js'
 import { settingsRouter } from './api/routes/settings.js'
+import type { WalletSyncRepository } from './wallet/WalletSyncRepository.js'
+import { walletSyncRouter } from './api/routes/wallet-sync.js'
 import type { WithdrawalIntentService } from './trading/WithdrawalIntentService.js'
 import type { OnSwitchPaymentRepository } from './payments/onswitch/repository.js'
 import type { OnSwitchCatalogueService } from './payments/onswitch/catalogue.js'
@@ -69,6 +71,7 @@ export type AppDependencies = {
   depositIntents?: DepositIntentService
   chessRepository?: ChessRepository
   settingsRepository?: SettingsRepository
+  walletSyncRepository?: WalletSyncRepository
   withdrawalIntentService?: WithdrawalIntentService
   onSwitchPaymentRepository?: OnSwitchPaymentRepository
   onSwitchCatalogue?: OnSwitchCatalogueService
@@ -97,6 +100,7 @@ export function createApp({
   depositIntents,
   chessRepository,
   settingsRepository,
+  walletSyncRepository,
   withdrawalIntentService,
   onSwitchPaymentRepository,
   onSwitchCatalogue,
@@ -181,6 +185,7 @@ export function createApp({
     if (chessRepository) app.use('/v1', chessRouter(chessRepository))
     if (profileRepository && floorService) app.use('/v1', socialRouter(profileRepository, floorService))
     if (settingsRepository) app.use('/v1', settingsRouter(settingsRepository))
+    if (walletSyncRepository) app.use('/v1', walletSyncRouter(walletSyncRepository))
   }
   app.use(notFound)
   app.use(errorHandler)
