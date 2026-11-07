@@ -13,6 +13,8 @@ export class ReconciliationWorker {
     private repo: TransactionRepository,
     private rpc: RpcManager,
     private env: Environment,
+    /** Called with the user whose transaction just settled on chain. */
+    private onSettled?: (userId: string) => void,
   ) {}
   start() {
     void this.tick()
@@ -42,12 +44,25 @@ export class ReconciliationWorker {
       this.running = false
     }
   }
+  private async settle(
+    record: any,
+    status: 'submitted' | 'confirmed' | 'failed' | 'dropped' | 'unknown',
+    attempt: number,
+    max: number,
+    detail?: string,
+  ) {
+    const final = await this.repo.reconcile(record.id, status, attempt, max, detail)
+    // Confirmed or failed, the wallet's balance has just moved (a failed
+    // transaction still burns its fee). Pending states change nothing.
+    if ((final === 'confirmed' || final === 'failed') && typeof record.userId === 'string')
+      this.onSettled?.(record.userId)
+  }
   private async one(record: any) {
     const network = NETWORKS.find((item) => item.networkId === record.networkId),
       attempt = Number(record.attempts) + 1
     if (!network) {
-      await this.repo.reconcile(
-        record.id,
+      await this.settle(
+        record,
         'unknown',
         attempt,
         this.env.TRANSACTION_RECONCILE_MAX_ATTEMPTS,
@@ -60,8 +75,8 @@ export class ReconciliationWorker {
         const client = this.rpc.evmClient(network)
         try {
           const receipt = await client.getTransactionReceipt({ hash: record.txHash })
-          await this.repo.reconcile(
-            record.id,
+          await this.settle(
+            record,
             receipt.status === 'success' ? 'confirmed' : 'failed',
             attempt,
             this.env.TRANSACTION_RECONCILE_MAX_ATTEMPTS,
@@ -70,16 +85,11 @@ export class ReconciliationWorker {
         } catch {
           try {
             await client.getTransaction({ hash: record.txHash })
-            await this.repo.reconcile(
-              record.id,
-              'submitted',
-              attempt,
-              this.env.TRANSACTION_RECONCILE_MAX_ATTEMPTS,
-            )
+            await this.settle(record, 'submitted', attempt, this.env.TRANSACTION_RECONCILE_MAX_ATTEMPTS)
           } catch {
             const old = Date.now() - new Date(record.createdAt).getTime() > 30 * 60_000
-            await this.repo.reconcile(
-              record.id,
+            await this.settle(
+              record,
               old ? 'dropped' : 'unknown',
               attempt,
               this.env.TRANSACTION_RECONCILE_MAX_ATTEMPTS,
@@ -96,17 +106,12 @@ export class ReconciliationWorker {
         const candidateStatus = (response as { status?: unknown })?.status
         const status = typeof candidateStatus === 'string' ? candidateStatus.toLowerCase() : ''
         if (status === 'confirmed' || status === 'finalized') {
-          await this.repo.reconcile(
-            record.id,
-            'confirmed',
-            attempt,
-            this.env.TRANSACTION_RECONCILE_MAX_ATTEMPTS,
-          )
+          await this.settle(record, 'confirmed', attempt, this.env.TRANSACTION_RECONCILE_MAX_ATTEMPTS)
           return
         }
         if (status === 'failed' || status === 'reverted') {
-          await this.repo.reconcile(
-            record.id,
+          await this.settle(
+            record,
             'failed',
             attempt,
             this.env.TRANSACTION_RECONCILE_MAX_ATTEMPTS,
@@ -115,17 +120,12 @@ export class ReconciliationWorker {
           return
         }
         if (status === 'pending' || status === 'accepted') {
-          await this.repo.reconcile(
-            record.id,
-            'submitted',
-            attempt,
-            this.env.TRANSACTION_RECONCILE_MAX_ATTEMPTS,
-          )
+          await this.settle(record, 'submitted', attempt, this.env.TRANSACTION_RECONCILE_MAX_ATTEMPTS)
           return
         }
         const old = Date.now() - new Date(record.createdAt).getTime() > 30 * 60_000
-        await this.repo.reconcile(
-          record.id,
+        await this.settle(
+          record,
           old ? 'dropped' : 'unknown',
           attempt,
           this.env.TRANSACTION_RECONCILE_MAX_ATTEMPTS,
@@ -140,8 +140,8 @@ export class ReconciliationWorker {
         ),
         value = statuses.value[0]
       if (!value) {
-        await this.repo.reconcile(
-          record.id,
+        await this.settle(
+          record,
           'unknown',
           attempt,
           this.env.TRANSACTION_RECONCILE_MAX_ATTEMPTS,
@@ -150,8 +150,8 @@ export class ReconciliationWorker {
         return
       }
       if (value.err) {
-        await this.repo.reconcile(
-          record.id,
+        await this.settle(
+          record,
           'failed',
           attempt,
           this.env.TRANSACTION_RECONCILE_MAX_ATTEMPTS,
@@ -159,15 +159,15 @@ export class ReconciliationWorker {
         )
         return
       }
-      await this.repo.reconcile(
-        record.id,
+      await this.settle(
+        record,
         value.confirmationStatus === 'finalized' ? 'confirmed' : 'submitted',
         attempt,
         this.env.TRANSACTION_RECONCILE_MAX_ATTEMPTS,
       )
     } catch (error) {
-      await this.repo.reconcile(
-        record.id,
+      await this.settle(
+        record,
         'unknown',
         attempt,
         this.env.TRANSACTION_RECONCILE_MAX_ATTEMPTS,

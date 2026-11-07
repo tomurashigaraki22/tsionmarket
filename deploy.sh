@@ -92,6 +92,10 @@ NETWORK_MODE=mainnet
 ETHEREUM_RPC_URLS=
 ARBITRUM_RPC_URLS=
 SOLANA_MAINNET_RPC_URLS=
+# Intertrain node on this host (tried first, then the public endpoint), e.g.
+#   http://host.docker.internal:<rpc-port>/rpc
+# The node must listen on an address the container can reach, not only 127.0.0.1.
+INTERTRAIN_MAINNET_RPC_URLS=
 
 LIFI_API_KEY=
 

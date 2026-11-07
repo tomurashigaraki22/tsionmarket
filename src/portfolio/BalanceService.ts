@@ -11,8 +11,21 @@ import {
 } from './intertrain.js'
 import type { Account, PortfolioRepository } from './PortfolioRepository.js'
 import type { RpcManager } from './RpcManager.js'
+import type { Network } from './networks.js'
 
 const erc20 = parseAbi(['function balanceOf(address owner) view returns (uint256)'])
+// Multicall3 is deployed at the same address on every chain we support, and its
+// getEthBalance lets the native balance ride in the same call as the tokens.
+const MULTICALL3 = '0xcA11bde05977b3631167028862bE2a173976CA11' as const
+const batchReads = parseAbi([
+  'function balanceOf(address owner) view returns (uint256)',
+  'function getEthBalance(address addr) view returns (uint256)',
+])
+/** The chain-identity check is a guard, not a per-read cost. */
+const INTERTRAIN_CHAIN_TTL_MS = 60_000
+/** How long a balance may be served while a fresh one loads behind it. */
+const DEFAULT_STALE_TTL_MS = 5 * 60_000
+const MAX_CACHED_ACCOUNTS = 5_000
 const TOKEN_PROGRAM = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
 const TOKEN_2022_PROGRAM = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')
 type AssetBalance = {
@@ -36,8 +49,12 @@ type AccountResult = {
 export type PortfolioSnapshot = { asOf: string; stale: boolean; accounts: AccountResult[]; errors: number }
 
 export class BalanceService {
-  private cache = new Map<string, { expires: number; value: PortfolioSnapshot }>()
-  private inflight = new Map<string, Promise<PortfolioSnapshot>>()
+  // Cached per address, not per user: the chain does not care who is asking,
+  // and a wallet opened twice (two tabs, valuation plus balances) is one read.
+  private accounts = new Map<string, { at: number; value: AccountResult }>()
+  private refreshing = new Map<string, Promise<AccountResult>>()
+  private userKeys = new Map<string, Set<string>>()
+  private intertrainChainOkAt = 0
   constructor(
     private repo: PortfolioRepository,
     private rpc: RpcManager,
@@ -118,22 +135,39 @@ export class BalanceService {
     }
   }
   async portfolio(userId: string, force = false): Promise<PortfolioSnapshot> {
-    const cached = this.cache.get(userId)
-    if (!force && cached && cached.expires > Date.now()) return cached.value
-    const active = this.inflight.get(userId)
-    if (active) return active
-    const job = this.load(userId)
-      .then((value) => {
-        this.cache.set(userId, { expires: Date.now() + this.env.BALANCE_CACHE_TTL_MS, value })
-        return value
-      })
-      .catch((error) => {
-        if (cached) return { ...cached.value, stale: true }
-        throw error
-      })
-      .finally(() => this.inflight.delete(userId))
-    this.inflight.set(userId, job)
-    return job
+    const accounts = (await this.repo.listAccounts(userId)).filter(
+      (account) => account.ownershipStatus === 'verified',
+    )
+    this.userKeys.set(userId, new Set(accounts.map(cacheKey)))
+    if (this.userKeys.size > MAX_CACHED_ACCOUNTS) {
+      const oldest = this.userKeys.keys().next().value
+      if (oldest !== undefined) this.userKeys.delete(oldest)
+    }
+    const results: AccountResult[] = []
+    let stale = false
+    for (let i = 0; i < accounts.length; i += this.env.BALANCE_MAX_CONCURRENCY) {
+      const batch = await Promise.all(
+        accounts.slice(i, i + this.env.BALANCE_MAX_CONCURRENCY).map((account) => this.read(account, force)),
+      )
+      for (const item of batch) {
+        results.push(item.result)
+        stale ||= item.stale
+      }
+    }
+    return {
+      asOf: new Date().toISOString(),
+      stale,
+      accounts: results,
+      errors: results.filter((r) => r.error).length,
+    }
+  }
+  /**
+   * Drops what is cached for a user's wallets, so the next read goes to the
+   * chain. Called when one of their transactions settles: that is the moment
+   * the cached number is known to be wrong.
+   */
+  invalidateUser(userId: string): void {
+    for (const key of this.userKeys.get(userId) ?? []) this.accounts.delete(key)
   }
   async intertrainNativeUsdPrice(): Promise<{
     priceUsd: string
@@ -156,44 +190,115 @@ export class BalanceService {
       return null
     }
   }
-  private async load(userId: string): Promise<PortfolioSnapshot> {
-    const accounts = (await this.repo.listAccounts(userId)).filter(
-        (account) => account.ownershipStatus === 'verified',
+  /**
+   * Fresh within the TTL; between the TTL and the stale window it answers from
+   * cache and refreshes behind the request, so a user opening the app is never
+   * made to wait on a chain read they have effectively already paid for.
+   */
+  private async read(account: Account, force: boolean): Promise<{ result: AccountResult; stale: boolean }> {
+    const key = cacheKey(account)
+    const entry = this.accounts.get(key)
+    const staleTtl = this.env.BALANCE_STALE_TTL_MS || DEFAULT_STALE_TTL_MS
+    const asOwn = (value: AccountResult): AccountResult => ({ ...value, accountId: account.id })
+    if (!force && entry) {
+      const age = Date.now() - entry.at
+      if (age < this.env.BALANCE_CACHE_TTL_MS) return { result: asOwn(entry.value), stale: false }
+      if (age < staleTtl) {
+        void this.refresh(account, key)
+        return { result: asOwn(entry.value), stale: true }
+      }
+    }
+    const fresh = await Promise.race([
+      this.refresh(account, key),
+      new Promise<AccountResult>((resolve) =>
+        setTimeout(
+          () => resolve(unavailable(account, 'Balance request timed out')),
+          this.env.BALANCE_AGGREGATE_TIMEOUT_MS,
+        ),
       ),
-      results: AccountResult[] = []
-    for (let i = 0; i < accounts.length; i += this.env.BALANCE_MAX_CONCURRENCY) {
-      results.push(
-        ...(await Promise.all(
-          accounts.slice(i, i + this.env.BALANCE_MAX_CONCURRENCY).map((a) =>
-            Promise.race([
-              this.balance(a),
-              new Promise<AccountResult>((resolve) =>
-                setTimeout(
-                  () =>
-                    resolve({
-                      accountId: a.id,
-                      networkId: a.networkId,
-                      address: a.address,
-                      assets: [],
-                      state: 'unavailable',
-                      observedAt: new Date().toISOString(),
-                      providerStatus: 'unavailable',
-                      error: { code: 'BALANCE_UNAVAILABLE', message: 'Balance request timed out' },
-                    }),
-                  this.env.BALANCE_AGGREGATE_TIMEOUT_MS,
-                ),
-              ),
-            ]),
-          ),
-        )),
+    ])
+    if (fresh.state === 'ready') return { result: asOwn(fresh), stale: false }
+    if (entry && Date.now() - entry.at < staleTtl) return { result: asOwn(entry.value), stale: true }
+    return { result: fresh, stale: false }
+  }
+  private refresh(account: Account, key: string): Promise<AccountResult> {
+    const active = this.refreshing.get(key)
+    if (active) return active
+    const job = this.balance(account)
+      .then((value) => {
+        if (value.state === 'ready') {
+          this.accounts.delete(key)
+          this.accounts.set(key, { at: Date.now(), value })
+          if (this.accounts.size > MAX_CACHED_ACCOUNTS) {
+            const oldest = this.accounts.keys().next().value
+            if (oldest !== undefined) this.accounts.delete(oldest)
+          }
+        }
+        return value
+      })
+      .finally(() => this.refreshing.delete(key))
+    this.refreshing.set(key, job)
+    return job
+  }
+  private async evmAssets(network: Network, address: `0x${string}`): Promise<AssetBalance[]> {
+    const client = this.rpc.evmClient(network)
+    const tokens = BALANCE_TOKENS[network.networkId] ?? []
+    const nativeAsset = (raw: bigint): AssetBalance => ({
+      assetId: 'native',
+      symbol: network.nativeSymbol,
+      decimals: network.nativeDecimals,
+      raw: raw.toString(),
+      formatted: formatUnits(raw, network.nativeDecimals),
+      supported: true,
+    })
+    const tokenAsset = (token: (typeof tokens)[number], raw: bigint): AssetBalance => ({
+      assetId: token.address,
+      symbol: token.symbol,
+      decimals: token.decimals,
+      raw: raw.toString(),
+      formatted: formatUnits(raw, token.decimals),
+      supported: true,
+    })
+    // One round trip for the native balance and every token, instead of 1 + N.
+    try {
+      // Mixed function names defeat viem's tuple inference; the shape is
+      // fixed here and the result is checked below, so the cast is contained.
+      const contracts = [
+        { address: MULTICALL3, abi: batchReads, functionName: 'getEthBalance', args: [address] },
+        ...tokens.map((token) => ({
+          address: token.address as `0x${string}`,
+          abi: batchReads,
+          functionName: 'balanceOf',
+          args: [address],
+        })),
+      ]
+      const values: unknown[] = await client.multicall({
+        multicallAddress: MULTICALL3,
+        allowFailure: false,
+        contracts: contracts as never,
+      })
+      if (values.length === tokens.length + 1 && values.every((value) => typeof value === 'bigint'))
+        return [
+          nativeAsset(values[0] as bigint),
+          ...tokens.map((token, i) => tokenAsset(token, values[i + 1] as bigint)),
+        ]
+    } catch {
+      // A node without multicall support still answers the plain calls below.
+    }
+    const assets = [nativeAsset(await client.getBalance({ address }))]
+    for (const token of tokens)
+      assets.push(
+        tokenAsset(
+          token,
+          await client.readContract({
+            address: token.address as `0x${string}`,
+            abi: erc20,
+            functionName: 'balanceOf',
+            args: [address],
+          }),
+        ),
       )
-    }
-    return {
-      asOf: new Date().toISOString(),
-      stale: false,
-      accounts: results,
-      errors: results.filter((r) => r.error).length,
-    }
+    return assets
   }
   private async balance(account: Account): Promise<AccountResult> {
     const network = NETWORKS.find((n) => n.networkId === account.networkId)
@@ -210,13 +315,16 @@ export class BalanceService {
       }
     try {
       if (network.family === 'intertrain') {
-        const chainInfo = await this.rpc.intertrainRequest(network, 'chain_info')
-        if (!isExpectedIntertrainChain(chainInfo))
-          throw new AppError(
-            'INTERTRAIN_NETWORK_MISMATCH',
-            'RPC endpoint is not the expected Intertrain mainnet WSK chain',
-            503,
-          )
+        if (Date.now() - this.intertrainChainOkAt > INTERTRAIN_CHAIN_TTL_MS) {
+          const chainInfo = await this.rpc.intertrainRequest(network, 'chain_info')
+          if (!isExpectedIntertrainChain(chainInfo))
+            throw new AppError(
+              'INTERTRAIN_NETWORK_MISMATCH',
+              'RPC endpoint is not the expected Intertrain mainnet WSK chain',
+              503,
+            )
+          this.intertrainChainOkAt = Date.now()
+        }
         const response = await this.rpc.intertrainRequest(network, 'account_get', {
           address: account.address,
         })
@@ -256,34 +364,7 @@ export class BalanceService {
       }
       if (network.family === 'evm') {
         if (!isAddress(account.address)) throw new AppError('INVALID_ADDRESS', 'Invalid EVM address', 400)
-        const client = this.rpc.evmClient(network),
-          native = await client.getBalance({ address: account.address })
-        const assets: AssetBalance[] = [
-          {
-            assetId: 'native',
-            symbol: network.nativeSymbol,
-            decimals: network.nativeDecimals,
-            raw: native.toString(),
-            formatted: formatUnits(native, network.nativeDecimals),
-            supported: true,
-          },
-        ]
-        for (const token of BALANCE_TOKENS[network.networkId] ?? []) {
-          const raw = await client.readContract({
-            address: token.address as `0x${string}`,
-            abi: erc20,
-            functionName: 'balanceOf',
-            args: [account.address],
-          })
-          assets.push({
-            assetId: token.address,
-            symbol: token.symbol,
-            decimals: token.decimals,
-            raw: raw.toString(),
-            formatted: formatUnits(raw, token.decimals),
-            supported: true,
-          })
-        }
+        const assets = await this.evmAssets(network, account.address)
         return {
           accountId: account.id,
           networkId: account.networkId,
@@ -363,5 +444,20 @@ export class BalanceService {
         },
       }
     }
+  }
+}
+
+const cacheKey = (account: Account) => `${account.networkId}:${account.address.toLowerCase()}`
+
+function unavailable(account: Account, message: string): AccountResult {
+  return {
+    accountId: account.id,
+    networkId: account.networkId,
+    address: account.address,
+    assets: [],
+    state: 'unavailable',
+    observedAt: new Date().toISOString(),
+    providerStatus: 'unavailable',
+    error: { code: 'BALANCE_UNAVAILABLE', message },
   }
 }

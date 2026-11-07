@@ -63,7 +63,12 @@ const intentService = new IntentService(tradingRepository, rpcManager, environme
 const withdrawalIntentService = new WithdrawalIntentService(tradingRepository, rpcManager, environment)
 const transactionRepository = new TransactionRepository(pool)
 const transactionService = new TransactionService(transactionRepository, rpcManager, environment)
-const reconciliationWorker = new ReconciliationWorker(transactionRepository, rpcManager, environment)
+const reconciliationWorker = new ReconciliationWorker(
+  transactionRepository,
+  rpcManager,
+  environment,
+  (userId) => balanceService.invalidateUser(userId),
+)
 const valuationService = new ValuationService(pool, balanceService)
 const arcadeRepository = new ArcadeRepository(pool)
 const roundRepository = new RoundRepository(

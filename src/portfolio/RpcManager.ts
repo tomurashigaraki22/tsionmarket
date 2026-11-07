@@ -13,20 +13,20 @@ export class RpcManager {
     if (network.networkId === 'solana-devnet') return ['https://api.devnet.solana.com']
     const source = this.env as unknown as Record<string, unknown>
     return [
-      ...new Set(
-        [
-          ...(network.defaultRpcUrls ?? []),
-          ...network.rpcKeys.flatMap((key) => {
-            const value = source[String(key)]
-            return typeof value === 'string'
-              ? value
-                  .split(',')
-                  .map((item) => item.trim())
-                  .filter(Boolean)
-              : []
-          }),
-        ],
-      ),
+      ...new Set([
+        ...network.rpcKeys.flatMap((key) => {
+          const value = source[String(key)]
+          return typeof value === 'string'
+            ? value
+                .split(',')
+                .map((item) => item.trim())
+                .filter(Boolean)
+            : []
+        }),
+        // Built-in public endpoints are the last resort: a node we run
+        // ourselves (see INTERTRAIN_MAINNET_RPC_URLS) answers first.
+        ...(network.defaultRpcUrls ?? []),
+      ]),
     ]
   }
   evmClient(network: Network): PublicClient {
@@ -44,6 +44,7 @@ export class RpcManager {
         decimals: network.nativeDecimals,
       },
       rpcUrls: { default: { http: urls } },
+      contracts: { multicall3: { address: '0xcA11bde05977b3631167028862bE2a173976CA11' } },
     })
     const client = createPublicClient({
       chain,

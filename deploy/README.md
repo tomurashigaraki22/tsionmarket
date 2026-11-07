@@ -84,6 +84,25 @@ have no safe fallback:
 | `AUTH_EMAIL_LINK_BASE_URL` | Where email links point — your frontend, not the API |
 | `*_RPC_URLS`               | Mainnet RPC endpoints for balances and transactions  |
 
+### Running beside the Intertrain nodes
+
+This stack shares its host with the Intertrain nodes. Point the API at the local
+node so Intertrain reads stay on the machine:
+
+```ini
+INTERTRAIN_MAINNET_RPC_URLS=http://host.docker.internal:<rpc-port>/rpc
+```
+
+The compose file maps `host.docker.internal` to the host gateway. The node has
+to listen on an address the container can reach (the Docker bridge or the LAN
+IP), not only `127.0.0.1`; if it does, bind that port to the bridge or firewall
+it so it is not exposed publicly. The built-in `https://rpc.intertrain.online/rpc`
+stays on the list as the fallback, tried after the local node.
+
+The node and this stack compete for CPU, memory and disk I/O. Watch the host
+before adding load: sustained `iowait` or swap use means MySQL and the node are
+starving each other.
+
 ### OnSwitch (disabled by default)
 
 The production deployment template keeps OnSwitch disabled by default. For

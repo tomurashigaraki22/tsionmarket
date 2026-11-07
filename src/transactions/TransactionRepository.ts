@@ -140,7 +140,7 @@ export class TransactionRepository {
     }
     params.push(limit + 1)
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT r.id,r.intent_id AS intentId,r.quote_id AS quoteId,r.chain_family AS chainFamily,r.network_id AS networkId,r.tx_hash AS txHash,r.status,r.from_address AS fromAddress,r.to_address AS toAddress,r.summary,r.provider,r.failure_code AS failureCode,r.submitted_at AS submittedAt,r.confirmed_at AS confirmedAt,r.created_at AS createdAt,r.updated_at AS updatedAt FROM transaction_records r WHERE r.user_id=?${after} ORDER BY r.created_at DESC,r.id DESC LIMIT ?`,
+      `SELECT r.id,r.user_id AS userId,r.intent_id AS intentId,r.quote_id AS quoteId,r.chain_family AS chainFamily,r.network_id AS networkId,r.tx_hash AS txHash,r.status,r.from_address AS fromAddress,r.to_address AS toAddress,r.summary,r.provider,r.failure_code AS failureCode,r.submitted_at AS submittedAt,r.confirmed_at AS confirmedAt,r.created_at AS createdAt,r.updated_at AS updatedAt FROM transaction_records r WHERE r.user_id=?${after} ORDER BY r.created_at DESC,r.id DESC LIMIT ?`,
       params as any,
     )
     const items = rows.slice(0, limit),
@@ -195,6 +195,7 @@ export class TransactionRepository {
         id,
       ],
     )
+    return finalStatus
   }
   async control(name: string) {
     const [rows] = await this.pool.execute<RowDataPacket[]>(

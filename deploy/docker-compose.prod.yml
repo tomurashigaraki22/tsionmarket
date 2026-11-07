@@ -100,11 +100,15 @@ services:
       SOLANA_MAINNET_RPC_URL: ${SOLANA_MAINNET_RPC_URL:-}
       SOLANA_RPC_URL: ${SOLANA_RPC_URL:-}
       SOLANA_FALLBACK_RPC_URL: ${SOLANA_FALLBACK_RPC_URL:-}
+      # Our own Intertrain node, when it runs on this host. Tried before the
+      # public endpoint; see deploy/README.md.
+      INTERTRAIN_MAINNET_RPC_URLS: ${INTERTRAIN_MAINNET_RPC_URLS:-}
       RPC_TIMEOUT_MS: ${RPC_TIMEOUT_MS:-8000}
       RPC_MAX_RETRIES: ${RPC_MAX_RETRIES:-1}
       RPC_PROVIDER_COOLDOWN_MS: ${RPC_PROVIDER_COOLDOWN_MS:-30000}
 
-      BALANCE_CACHE_TTL_MS: ${BALANCE_CACHE_TTL_MS:-15000}
+      BALANCE_CACHE_TTL_MS: ${BALANCE_CACHE_TTL_MS:-45000}
+      BALANCE_STALE_TTL_MS: ${BALANCE_STALE_TTL_MS:-300000}
       BALANCE_AGGREGATE_TIMEOUT_MS: ${BALANCE_AGGREGATE_TIMEOUT_MS:-12000}
       BALANCE_MAX_CONCURRENCY: ${BALANCE_MAX_CONCURRENCY:-5}
       SPOT_MARKET_REGISTRY_ENABLED: ${SPOT_MARKET_REGISTRY_ENABLED:-false}
@@ -170,6 +174,11 @@ services:
       ONSWITCH_WORKER_BATCH_SIZE: ${ONSWITCH_WORKER_BATCH_SIZE:-20}
       ONSWITCH_WORKER_MAX_ATTEMPTS: ${ONSWITCH_WORKER_MAX_ATTEMPTS:-12}
       ONSWITCH_WORKER_LOCK_SECONDS: ${ONSWITCH_WORKER_LOCK_SECONDS:-90}
+    # This stack shares a host with the Intertrain nodes. host.docker.internal
+    # lets the API reach a node listening on the host's loopback or LAN address
+    # instead of going out to the public RPC and back.
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     # Loopback only. Public traffic arrives through Caddy over TLS.
     ports:
       - '127.0.0.1:${API_LOCAL_PORT:-3456}:3456'
