@@ -1,3 +1,5 @@
+import { bech32m } from '@scure/base'
+
 type RecordValue = Record<string, unknown>
 
 const asRecord = (value: unknown): RecordValue | null =>
@@ -8,6 +10,25 @@ function rawInteger(value: unknown): bigint | null {
   if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return BigInt(value)
   if (typeof value === 'string' && /^\d+$/.test(value)) return BigInt(value)
   return null
+}
+
+/**
+ * Whether the node's answer is about the address we asked for.
+ *
+ * The node reports an account under its own `wsk` prefix, while we hold and
+ * display it as `mna`. Same 21 address bytes, different prefix and therefore
+ * different checksum, so comparing the strings rejects a correct answer.
+ * Compare the decoded bytes instead; an undecodable or different address still
+ * fails.
+ */
+export function isSameIntertrainAddress(reported: string, requested: string): boolean {
+  try {
+    const a = bech32m.decodeToBytes(reported.trim())
+    const b = bech32m.decodeToBytes(requested.trim())
+    return Buffer.from(a.bytes).equals(Buffer.from(b.bytes))
+  } catch {
+    return reported.trim().toLowerCase() === requested.trim().toLowerCase()
+  }
 }
 
 export function isExpectedIntertrainChain(value: unknown): boolean {

@@ -79,7 +79,7 @@ function app(repository: Partial<WalletSyncRepository>) {
   const server = express()
   server.use(express.json({ limit: '256kb' }))
   server.use((req, _res, next) => {
-    req.identity = { userId: 'user-1' } as Express.Request['identity']
+    req.identity = { userId: 'user-1' } as NonNullable<Express.Request['identity']>
     next()
   })
   server.use('/v1', walletSyncRouter(repository as WalletSyncRepository))

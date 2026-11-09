@@ -100,7 +100,11 @@ export function normalizeAddress(family: 'evm' | 'solana' | 'intertrain', addres
     }
     if (family === 'intertrain') {
       const decoded = bech32m.decodeToBytes(address.trim())
-      if (decoded.prefix !== 'mna' || decoded.bytes.length !== 21 || decoded.bytes[0] !== 1)
+      if (
+        (decoded.prefix !== 'mna' && decoded.prefix !== 'wsk') ||
+        decoded.bytes.length !== 21 ||
+        decoded.bytes[0] !== 1
+      )
         throw new Error('invalid')
       return bech32m.encodeFromBytes('mna', decoded.bytes)
     }

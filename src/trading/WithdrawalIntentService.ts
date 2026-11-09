@@ -439,11 +439,15 @@ export class WithdrawalIntentService {
     let recipient: string
     try {
       const decoded = bech32m.decodeToBytes(input.toAddress.trim())
-      if (decoded.prefix !== 'mna' || decoded.bytes.length !== 21 || decoded.bytes[0] !== 1)
+      if (
+        (decoded.prefix !== 'mna' && decoded.prefix !== 'wsk') ||
+        decoded.bytes.length !== 21 ||
+        decoded.bytes[0] !== 1
+      )
         throw new Error('invalid address')
       recipient = bech32m.encodeFromBytes('mna', decoded.bytes)
     } catch {
-      throw new AppError('INVALID_ADDRESS', 'Enter a valid Intertrain mna1 destination address', 400)
+      throw new AppError('INVALID_ADDRESS', 'Enter a valid Intertrain wsk1 destination address', 400)
     }
     if (recipient === account.address)
       throw new AppError('SAME_ADDRESS', 'Choose a different destination address', 400)

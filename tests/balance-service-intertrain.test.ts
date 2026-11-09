@@ -89,3 +89,37 @@ describe('Intertrain balance aggregation', () => {
     expect(snapshot.errors).toBe(1)
   })
 })
+
+describe('node address spelling', () => {
+  it('accepts the same account reported under the wsk prefix', async () => {
+    const { isSameIntertrainAddress } = await import('../src/portfolio/intertrain.js')
+    expect(
+      isSameIntertrainAddress(
+        'wsk1qy2y9mw6kqj2pvnlcq7z5xctvp5xaxd0xvcnlpjq',
+        'mna1qy2y9mw6kqj2pvnlcq7z5xctvp5xaxd0xv77zkxg',
+      ),
+    ).toBe(true)
+  })
+
+  it('still rejects a different account', async () => {
+    const { isSameIntertrainAddress } = await import('../src/portfolio/intertrain.js')
+    expect(
+      isSameIntertrainAddress(
+        'mna1q8lye5pxhet776htmfrgf2ffrvztuf0j65dyuyjz',
+        'mna1qy2y9mw6kqj2pvnlcq7z5xctvp5xaxd0xv77zkxg',
+      ),
+    ).toBe(false)
+  })
+})
+
+describe('destination spelling', () => {
+  it('lists the wsk prefix as accepted by every parser', async () => {
+    const { readFileSync } = await import('node:fs')
+    for (const file of [
+      'src/transactions/TransactionService.ts',
+      'src/portfolio/OwnershipService.ts',
+      'src/trading/WithdrawalIntentService.ts',
+    ])
+      expect(readFileSync(file, 'utf8')).toContain("decoded.prefix !== 'wsk'")
+  })
+})

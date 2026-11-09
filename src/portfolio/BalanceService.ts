@@ -7,6 +7,7 @@ import { BALANCE_TOKENS, NETWORKS } from './networks.js'
 import {
   isExpectedIntertrainChain,
   isIntertrainReservePriceable,
+  isSameIntertrainAddress,
   parseIntertrainNativeBalance,
 } from './intertrain.js'
 import type { Account, PortfolioRepository } from './PortfolioRepository.js'
@@ -337,7 +338,7 @@ export class BalanceService {
           )
         const data =
           typeof response === 'object' && response !== null ? (response as Record<string, unknown>) : null
-        if (typeof data?.address === 'string' && data.address.toLowerCase() !== account.address.toLowerCase())
+        if (typeof data?.address === 'string' && !isSameIntertrainAddress(data.address, account.address))
           throw new AppError(
             'INTERTRAIN_RPC_ADDRESS_MISMATCH',
             'Intertrain returned a balance for a different address',

@@ -246,7 +246,11 @@ function intertrainTransferBytes(input: {
   }
   const address = (value: string) => {
     const decoded = bech32m.decodeToBytes(value)
-    if (decoded.prefix !== 'mna' || decoded.bytes.length !== 21 || decoded.bytes[0] !== 1)
+    if (
+      (decoded.prefix !== 'mna' && decoded.prefix !== 'wsk') ||
+      decoded.bytes.length !== 21 ||
+      decoded.bytes[0] !== 1
+    )
       throw new AppError('WITHDRAWAL_INTENT_INVALID', 'Intertrain address in intent is malformed', 400)
     return decoded.bytes
   }
